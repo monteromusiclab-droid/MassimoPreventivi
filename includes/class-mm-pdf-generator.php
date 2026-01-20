@@ -1,33 +1,50 @@
 <?php
 /**
  * Generatore PDF - Massimo Manca Preventivi
- * Supporta TCPDF (se disponibile) con fallback HTML to PDF
+ * Supporta DOMPDF (PHP 8+), TCPDF, con fallback HTML
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
+// Carica DOMPDF se disponibile
+$dompdf_autoload = dirname(__FILE__) . '/dompdf/autoload.php';
+if (file_exists($dompdf_autoload)) {
+    require_once $dompdf_autoload;
+}
+
+use Dompdf\Dompdf;
+use Dompdf\Options;
+
 class MM_PDF_Generator {
 
     /**
-     * Genera PDF preventivo
+     * Genera PDF preventivo (visualizzazione HTML con pulsante download PDF)
      */
     public static function generate_pdf($preventivo) {
-        // PHP 8+ ha problemi con vecchie versioni di TCPDF
-        // Usa sempre HTML fallback che funziona perfettamente
-        if (version_compare(PHP_VERSION, '8.0.0', '>=')) {
-            error_log('MM Preventivi - Usando HTML fallback (PHP ' . PHP_VERSION . ')');
-            self::generate_html_pdf($preventivo);
-            return;
+        // Visualizza sempre HTML responsive con pulsante per scaricare PDF
+        self::generate_html_pdf($preventivo);
+    }
+
+    /**
+     * Genera e scarica PDF vero usando DOMPDF
+     */
+    public static function download_real_pdf($preventivo) {
+        // Prova DOMPDF (compatibile con PHP 8+)
+        if (class_exists('Dompdf\Dompdf')) {
+            try {
+                self::generate_dompdf($preventivo);
+                return;
+            } catch (Exception $e) {
+                error_log('MM Preventivi - Errore DOMPDF: ' . $e->getMessage());
+            }
         }
 
-        // Per PHP < 8, prova a usare TCPDF se disponibile
+        // Fallback: TCPDF per PHP < 8
         if (!class_exists('TCPDF')) {
-            // Prova a caricare TCPDF da plugin comuni o installazioni WordPress
             $tcpdf_paths = array(
                 ABSPATH . 'wp-content/plugins/tcpdf/tcpdf.php',
-                ABSPATH . 'wp-includes/TCPDF/tcpdf.php',
                 dirname(__FILE__) . '/tcpdf/tcpdf.php',
             );
 
@@ -39,18 +56,608 @@ class MM_PDF_Generator {
             }
         }
 
-        // Se TCPDF è disponibile, usalo
         if (class_exists('TCPDF')) {
             try {
                 self::generate_tcpdf($preventivo);
+                return;
             } catch (Exception $e) {
-                error_log('MM Preventivi - Errore TCPDF, fallback a HTML: ' . $e->getMessage());
-                self::generate_html_pdf($preventivo);
+                error_log('MM Preventivi - Errore TCPDF: ' . $e->getMessage());
             }
-        } else {
-            // Altrimenti usa il fallback HTML
-            self::generate_html_pdf($preventivo);
         }
+
+        // Ultimo fallback: genera HTML e suggerisci stampa come PDF
+        wp_die('Impossibile generare il PDF. Usa la funzione "Stampa" del browser e seleziona "Salva come PDF".');
+    }
+
+    /**
+     * Genera PDF con DOMPDF (compatibile PHP 8+)
+     */
+    private static function generate_dompdf($preventivo) {
+        // Configura DOMPDF
+        $options = new Options();
+        $options->set('isRemoteEnabled', true);
+        $options->set('isHtml5ParserEnabled', true);
+        $options->set('defaultFont', 'DejaVu Sans');
+
+        $dompdf = new Dompdf($options);
+
+        // Genera HTML per il PDF
+        $html = self::generate_pdf_html_content($preventivo);
+
+        $dompdf->loadHtml($html);
+        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->render();
+
+        // Output PDF
+        $filename = 'Preventivo_' . $preventivo['numero_preventivo'] . '.pdf';
+        $dompdf->stream($filename, array('Attachment' => true));
+        exit;
+    }
+
+    /**
+     * Genera HTML per PDF identico alla versione stampata
+     * Replica esatto layout dell'anteprima HTML ma con CSS compatibile DOMPDF
+     */
+    private static function generate_pdf_html_content($preventivo) {
+        // Impostazioni aziendali
+        $company_name = get_option('mm_preventivi_company_name', 'MONTERO MUSIC di Massimo Manca');
+        $company_address = get_option('mm_preventivi_company_address', 'Via Ofanto, 37 73047 Monteroni di Lecce (LE)');
+        $company_phone = get_option('mm_preventivi_company_phone', '333-7512343');
+        $company_email = get_option('mm_preventivi_company_email', 'info@massimomanca.it');
+        $company_piva = get_option('mm_preventivi_company_piva', 'P.I. 04867450753');
+        $company_cf = get_option('mm_preventivi_company_cf', 'C.F. MNCMSM79E01119H');
+        $company_logo = get_option('mm_preventivi_logo', '');
+
+        // Variabili categoria e stato
+        $categoria_nome = !empty($preventivo['categoria_nome']) ? strtolower($preventivo['categoria_nome']) : '';
+        $label_cliente = ($categoria_nome === 'matrimonio') ? 'Sposi' : 'Cliente';
+        $stato = !empty($preventivo['stato']) ? $preventivo['stato'] : 'attivo';
+        $stato_label = ucfirst($stato);
+        $categoria_display = !empty($preventivo['categoria_nome']) ? $preventivo['categoria_nome'] : 'Non specificato';
+        $categoria_icona = !empty($preventivo['categoria_icona']) ? $preventivo['categoria_icona'] : '';
+
+        // Colori stato
+        $stato_colors = array(
+            'bozza' => '#ff9800',
+            'attivo' => '#4caf50',
+            'inviato' => '#2196f3',
+            'accettato' => '#8bc34a',
+            'rifiutato' => '#f44336',
+            'archiviato' => '#9e9e9e'
+        );
+        $stato_color = isset($stato_colors[$stato]) ? $stato_colors[$stato] : '#4caf50';
+
+        // Calcoli finanziari
+        $totale_servizi = floatval($preventivo['totale_servizi']);
+        $sconto = isset($preventivo['sconto']) ? floatval($preventivo['sconto']) : 0;
+        $sconto_percentuale = isset($preventivo['sconto_percentuale']) ? floatval($preventivo['sconto_percentuale']) : 0;
+        $importo_sconto = 0;
+        if ($sconto_percentuale > 0) {
+            $importo_sconto = $totale_servizi * ($sconto_percentuale / 100);
+        } elseif ($sconto > 0) {
+            $importo_sconto = $sconto;
+        }
+        $totale_dopo_sconto = $totale_servizi - $importo_sconto;
+
+        $applica_enpals = isset($preventivo['applica_enpals']) && $preventivo['applica_enpals'] == 1;
+        $applica_iva = isset($preventivo['applica_iva']) && $preventivo['applica_iva'] == 1;
+
+        $enpals_committente_percentage = floatval(get_option('mm_preventivi_enpals_committente_percentage', 23.81));
+        $enpals_lavoratore_percentage = floatval(get_option('mm_preventivi_enpals_lavoratore_percentage', 9.19));
+        $iva_percentage = floatval(get_option('mm_preventivi_iva_percentage', 22));
+
+        $enpals_committente = $applica_enpals ? ($totale_dopo_sconto * ($enpals_committente_percentage / 100)) : 0;
+        $enpals_lavoratore = $applica_enpals ? ($totale_dopo_sconto * ($enpals_lavoratore_percentage / 100)) : 0;
+        $imponibile_iva = $totale_dopo_sconto + $enpals_committente;
+        $iva = $applica_iva ? ($imponibile_iva * ($iva_percentage / 100)) : 0;
+        $totale = $imponibile_iva + $iva;
+
+        $html = '<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Preventivo ' . esc_html($preventivo['numero_preventivo']) . '</title>
+    <style>
+        @page { margin: 12mm 15mm; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: DejaVu Sans, Arial, sans-serif;
+            font-size: 11px;
+            line-height: 1.5;
+            color: #333;
+            background: white;
+        }
+
+        /* Header */
+        .header {
+            border-bottom: 4px solid #e91e63;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .header-table { width: 100%; border-collapse: collapse; }
+        .header-table td { vertical-align: middle; border: none; padding: 0; }
+        .logo { max-height: 70px; }
+        .company-name { color: #e91e63; font-size: 20px; font-weight: bold; }
+        .subtitle { font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-top: 3px; }
+        .preventivo-title { color: #e91e63; font-size: 16px; font-weight: bold; margin-bottom: 3px; }
+        .preventivo-numero { color: #666; font-size: 12px; }
+
+        /* Tipo Evento e Stato */
+        .tipo-stato-table { width: 100%; border-collapse: collapse; margin: 15px 0 10px 0; }
+        .tipo-evento-cell {
+            background-color: #e91e63;
+            color: white;
+            padding: 6px 15px;
+            font-weight: 600;
+            font-size: 11px;
+        }
+        .stato-cell {
+            background-color: ' . $stato_color . ';
+            color: white;
+            padding: 6px 15px;
+            font-weight: 600;
+            font-size: 11px;
+            text-align: center;
+            width: 150px;
+        }
+
+        /* Info Grid */
+        .info-table { width: 100%; border-collapse: separate; border-spacing: 15px 0; margin: 15px 0; }
+        .info-table td { width: 50%; vertical-align: top; padding: 0; }
+        .info-box {
+            background-color: #f8f8f8;
+            padding: 12px;
+            border: 2px solid #e91e63;
+        }
+        .info-box-title {
+            color: #e91e63;
+            font-weight: bold;
+            font-size: 11px;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e91e63;
+        }
+        .info-row { margin: 5px 0; font-size: 12px; }
+        .info-row-main { font-size: 16px; font-weight: bold; margin: 5px 0; }
+
+        /* Servizi Extra */
+        .extra-box {
+            background-color: #f5f5f5;
+            border-left: 4px solid #9c27b0;
+            padding: 10px 12px;
+            margin: 12px 0;
+        }
+        .extra-tag {
+            display: inline-block;
+            background: #fff;
+            border: 1px solid #d0d0d0;
+            padding: 4px 10px;
+            margin: 2px;
+            font-size: 10px;
+        }
+        .checkmark {
+            display: inline-block;
+            background: #9c27b0;
+            color: white;
+            width: 12px;
+            height: 12px;
+            text-align: center;
+            line-height: 12px;
+            font-size: 9px;
+            margin-right: 4px;
+        }
+
+        /* Section Title */
+        h2 {
+            color: #e91e63;
+            font-size: 14px;
+            margin: 15px 0 10px 0;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #f8bbd0;
+        }
+
+        /* Tabella Servizi */
+        .servizi-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 10px; }
+        .servizi-table th {
+            background: #e91e63;
+            color: white;
+            padding: 8px;
+            text-align: left;
+            font-weight: bold;
+        }
+        .servizi-table th.right { text-align: right; }
+        .servizi-table td {
+            padding: 8px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .servizi-table td.right { text-align: right; }
+        .sconto-verde { color: #4caf50; font-weight: bold; }
+
+        /* Two Column Grid per Note e Totali */
+        .two-col-table { width: 100%; border-collapse: separate; border-spacing: 15px 0; margin: 15px 0; }
+        .two-col-table > tbody > tr > td { width: 50%; vertical-align: top; padding: 0; }
+        .column-box {
+            background: #fafafa;
+            padding: 12px;
+            border: 2px solid #e91e63;
+        }
+        .column-box h3 {
+            margin: 0 0 8px 0;
+            color: #e91e63;
+            font-size: 12px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #f8bbd0;
+        }
+
+        /* Tabella Totali interna */
+        .totali-inner { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .totali-inner td { padding: 4px 0; border: none; }
+        .totali-inner td.right { text-align: right; font-weight: bold; }
+        .totali-inner .highlight { background-color: #fff9c4; }
+        .totali-inner .sconto-row td { color: #4caf50; }
+        .totali-inner .subtotale-row td { border-top: 2px solid #ddd; padding-top: 6px; }
+        .totali-inner .enpals-detail td { font-size: 9px; color: #666; background-color: #fffaf0; }
+
+        /* Box Totale Finale */
+        .totale-finale {
+            background: #f8bbd0;
+            padding: 10px 12px;
+            margin-top: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #e91e63;
+        }
+        .totale-finale-table { width: 100%; }
+        .totale-finale-table td { border: none; padding: 0; }
+        .totale-finale-table td.right { text-align: right; }
+
+        /* Acconti */
+        .acconto-box {
+            background: #e8f5e9;
+            padding: 8px 12px;
+            border-left: 4px solid #4caf50;
+            margin: 8px 0;
+            font-size: 10px;
+        }
+        .acconto-box p { margin: 3px 0; }
+        .acconto-box strong { color: #2e7d32; }
+
+        /* Note */
+        .note-box {
+            background: #fffaf0;
+            padding: 8px 12px;
+            border-left: 4px solid #ff9800;
+            margin: 8px 0;
+            font-size: 11px;
+            line-height: 1.6;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+            text-align: center;
+            font-size: 9px;
+            color: #999;
+        }
+        .footer strong { color: #e91e63; }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <div class="header">
+        <table class="header-table">
+            <tr>
+                <td style="width: 60%;">';
+
+        if (!empty($company_logo)) {
+            $html .= '<img src="' . esc_url($company_logo) . '" class="logo" style="margin-bottom: 5px;"><br>';
+        }
+
+        $html .= '<div class="company-name">' . esc_html($company_name) . '</div>
+                    <div class="subtitle">DJ - Animazione - Scenografie - Photo Booth</div>
+                </td>
+                <td style="width: 40%; text-align: right;">
+                    <div class="preventivo-title">PREVENTIVO</div>
+                    <div class="preventivo-numero">N. ' . esc_html($preventivo['numero_preventivo']) . '</div>
+                    <div class="preventivo-numero" style="margin-top: 3px;">del ' . date('d/m/Y', strtotime($preventivo['data_preventivo'])) . '</div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- Tipo Evento e Stato -->
+    <table class="tipo-stato-table">
+        <tr>
+            <td class="tipo-evento-cell">TIPO DI EVENTO RICHIESTO: ' . esc_html($categoria_icona) . ' ' . strtoupper(esc_html($categoria_display)) . '</td>
+            <td class="stato-cell">STATO: ' . strtoupper(esc_html($stato_label)) . '</td>
+        </tr>
+    </table>
+
+    <!-- Info Cliente e Evento -->
+    <table class="info-table">
+        <tr>
+            <td>
+                <div class="info-box">
+                    <div class="info-box-title">' . esc_html($label_cliente) . '</div>
+                    <div class="info-row-main">' . esc_html($preventivo['sposi']) . '</div>
+                    <div class="info-row">' . esc_html($preventivo['email']) . '</div>
+                    <div class="info-row">' . esc_html($preventivo['telefono']) . '</div>
+                </div>
+            </td>
+            <td>
+                <div class="info-box">
+                    <div class="info-box-title">Dettagli Evento</div>
+                    <div class="info-row-main">' . date('d/m/Y', strtotime($preventivo['data_evento'])) . '</div>
+                    <div class="info-row">' . esc_html($preventivo['tipo_evento']) . '</div>
+                    <div class="info-row">' . esc_html($preventivo['location']) . '</div>
+                </div>
+            </td>
+        </tr>
+    </table>';
+
+        // Rito/Cerimonia
+        $cerimonia_array = !empty($preventivo['cerimonia']) ? (is_array($preventivo['cerimonia']) ? $preventivo['cerimonia'] : explode(',', $preventivo['cerimonia'])) : array();
+        if (!empty($cerimonia_array)) {
+            $cerimonia_items = array();
+            foreach ($cerimonia_array as $item) {
+                $item = trim($item);
+                if (!empty($item)) {
+                    $cerimonia_items[] = esc_html($item);
+                }
+            }
+            if (!empty($cerimonia_items)) {
+                $html .= '<div style="margin: 8px 0; padding: 6px 12px; background: #fff3e0; border-left: 4px solid #ff9800;">
+                    <span style="font-size: 10px; color: #e65100; font-weight: bold;">RITO:</span>
+                    <span style="font-size: 11px; color: #bf360c; font-weight: 600; margin-left: 8px;">' . implode(' - ', $cerimonia_items) . '</span>
+                </div>';
+            }
+        }
+
+        // Servizi Extra
+        $extra_array = !empty($preventivo['servizi_extra']) ? (is_array($preventivo['servizi_extra']) ? $preventivo['servizi_extra'] : explode(',', $preventivo['servizi_extra'])) : array();
+        if (!empty($extra_array)) {
+            $html .= '<div class="extra-box">';
+            foreach ($extra_array as $item) {
+                $item = trim($item);
+                if (!empty($item)) {
+                    $html .= '<span class="extra-tag"><span class="checkmark">&#10003;</span>' . esc_html($item) . '</span>';
+                }
+            }
+            $html .= '</div>';
+        }
+
+        // Verifica sconti sui servizi
+        $ha_sconti = false;
+        foreach ($preventivo['servizi'] as $servizio) {
+            if (isset($servizio['sconto']) && floatval($servizio['sconto']) > 0) {
+                $ha_sconti = true;
+                break;
+            }
+        }
+
+        // Tabella Servizi
+        $html .= '<h2>Dettaglio Prezzi</h2>
+        <table class="servizi-table">
+            <thead>
+                <tr>
+                    <th>Servizio</th>
+                    <th class="right" style="width: 80px;">Prezzo</th>';
+        if ($ha_sconti) {
+            $html .= '<th class="right" style="width: 80px;">Sconto</th>';
+        }
+        $html .= '<th class="right" style="width: 80px;">Totale</th>
+                </tr>
+            </thead>
+            <tbody>';
+
+        foreach ($preventivo['servizi'] as $servizio) {
+            $prezzo = floatval($servizio['prezzo']);
+            $sconto_serv = isset($servizio['sconto']) ? floatval($servizio['sconto']) : 0;
+            $totale_serv = $prezzo - $sconto_serv;
+
+            $html .= '<tr>
+                <td>' . esc_html($servizio['nome_servizio']) . '</td>
+                <td class="right">' . ($prezzo > 0 ? number_format($prezzo, 2, ',', '.') . ' &euro;' : '<span style="color:#999;">Incluso</span>') . '</td>';
+            if ($ha_sconti) {
+                $html .= '<td class="right">' . ($sconto_serv > 0 ? '<span class="sconto-verde">-' . number_format($sconto_serv, 2, ',', '.') . ' &euro;</span>' : '—') . '</td>';
+            }
+            $html .= '<td class="right"><strong>' . ($prezzo > 0 ? number_format($totale_serv, 2, ',', '.') . ' &euro;' : '—') . '</strong></td>
+            </tr>';
+        }
+
+        $html .= '</tbody></table>';
+
+        // Layout a due colonne: Note (sinistra) e Totali (destra)
+        $html .= '<table class="two-col-table">
+            <tr>
+                <!-- Colonna Note -->
+                <td>
+                    <div class="column-box">
+                        <h3>Note</h3>';
+
+        if (!empty($preventivo['note'])) {
+            $html .= '<div style="line-height: 1.5; font-size: 11px;">' . nl2br(esc_html($preventivo['note'])) . '</div>';
+        } else {
+            $html .= '<p style="color: #999; font-style: italic; font-size: 11px;">Nessuna nota aggiuntiva</p>';
+        }
+
+        $html .= '</div>
+                </td>
+
+                <!-- Colonna Totali -->
+                <td>
+                    <div class="column-box">
+                        <h3>Riepilogo Importi</h3>
+                        <table class="totali-inner">';
+
+        // Evidenzia totale servizi se non ci sono sconti
+        $evidenzia = ($importo_sconto == 0) ? ' class="highlight"' : '';
+        $html .= '<tr' . $evidenzia . '>
+            <td><strong>Totale Servizi</strong></td>
+            <td class="right">' . number_format($totale_servizi, 2, ',', '.') . ' &euro;</td>
+        </tr>';
+
+        if ($importo_sconto > 0) {
+            $sconto_label = 'Sconto';
+            if ($sconto_percentuale > 0) {
+                $sconto_label .= ' (' . number_format($sconto_percentuale, 0) . '%)';
+            }
+            $html .= '<tr class="sconto-row">
+                <td>- ' . $sconto_label . '</td>
+                <td class="right">' . number_format($importo_sconto, 2, ',', '.') . ' &euro;</td>
+            </tr>
+            <tr class="subtotale-row highlight">
+                <td><strong>Subtotale</strong></td>
+                <td class="right">' . number_format($totale_dopo_sconto, 2, ',', '.') . ' &euro;</td>
+            </tr>';
+        }
+
+        // ENPALS dettaglio
+        if ($applica_enpals) {
+            $enpals_33_percent = $totale_dopo_sconto * 0.33;
+            $html .= '<tr>
+                <td>Ex Enpals 33%</td>
+                <td class="right">' . number_format($enpals_33_percent, 2, ',', '.') . ' &euro;</td>
+            </tr>
+            <tr class="enpals-detail">
+                <td>- Ex Enpals Lavoratore ' . number_format($enpals_lavoratore_percentage, 2) . '%</td>
+                <td class="right">- ' . number_format($enpals_lavoratore, 2, ',', '.') . ' &euro;</td>
+            </tr>
+            <tr>
+                <td>Ex Enpals Committente</td>
+                <td class="right">' . number_format($enpals_committente, 2, ',', '.') . ' &euro;</td>
+            </tr>';
+        }
+
+        // Imponibile
+        $html .= '<tr>
+            <td><strong>Imponibile</strong></td>
+            <td class="right"><strong>' . number_format($imponibile_iva, 2, ',', '.') . ' &euro;</strong></td>
+        </tr>';
+
+        // IVA
+        if ($applica_iva && $iva > 0) {
+            $html .= '<tr>
+                <td>IVA ' . number_format($iva_percentage, 0) . '%</td>
+                <td class="right">' . number_format($iva, 2, ',', '.') . ' &euro;</td>
+            </tr>';
+        }
+
+        $html .= '</table>
+
+                        <!-- Box Totale Finale -->
+                        <div class="totale-finale">
+                            <table class="totale-finale-table">
+                                <tr>
+                                    <td>TOTALE</td>
+                                    <td class="right">' . number_format($totale, 2, ',', '.') . ' &euro;</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        </table>';
+
+        // Acconti
+        $acconti = isset($preventivo['acconti']) && is_array($preventivo['acconti']) ? $preventivo['acconti'] : array();
+        if (empty($acconti) && !empty($preventivo['data_acconto']) && !empty($preventivo['importo_acconto']) && floatval($preventivo['importo_acconto']) > 0) {
+            $acconti = array(array(
+                'data_acconto' => $preventivo['data_acconto'],
+                'importo_acconto' => $preventivo['importo_acconto']
+            ));
+        }
+
+        if (!empty($acconti)) {
+            $html .= '<div class="acconto-box">
+                <p><strong>Acconti Versati:</strong></p>';
+            $totale_acconti = 0;
+            foreach ($acconti as $acconto) {
+                $importo_acc = floatval($acconto['importo_acconto']);
+                $totale_acconti += $importo_acc;
+                $html .= '<p>&#10003; Acconto del ' . date('d/m/Y', strtotime($acconto['data_acconto'])) . ': <strong>' . number_format($importo_acc, 2, ',', '.') . ' &euro;</strong></p>';
+            }
+            if (count($acconti) > 1) {
+                $html .= '<p><strong>Totale acconti: ' . number_format($totale_acconti, 2, ',', '.') . ' &euro;</strong></p>';
+            }
+            $restante = $totale - $totale_acconti;
+            $html .= '<p style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #4caf50;"><strong>Restante da saldare: ' . number_format($restante, 2, ',', '.') . ' &euro;</strong></p>
+            </div>';
+        }
+
+        // Sezione Altri Servizi Disponibili (non selezionati)
+        $servizi_catalogo = MM_Database::get_catalogo_servizi();
+        $servizi_selezionati_nomi = array_map(function($s) {
+            return strtolower(trim($s['nome_servizio']));
+        }, $preventivo['servizi']);
+
+        $servizi_disponibili = array_filter($servizi_catalogo, function($servizio) use ($servizi_selezionati_nomi) {
+            return $servizio['attivo'] == 1 &&
+                   !in_array(strtolower(trim($servizio['nome_servizio'])), $servizi_selezionati_nomi);
+        });
+
+        if (!empty($servizi_disponibili)) {
+            $html .= '<h2 style="margin-top: 25px;">Altri Servizi Disponibili</h2>
+            <div style="background: #f8f8f8; padding: 12px; border: 1px solid #e0e0e0;">
+                <table class="servizi-table" style="margin: 0;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left;">Servizio</th>
+                            <th style="width: 120px; text-align: left;">Categoria</th>
+                            <th style="width: 90px; text-align: right;">Prezzo</th>
+                        </tr>
+                    </thead>
+                    <tbody>';
+
+            // Ordina per categoria e poi per ordinamento
+            usort($servizi_disponibili, function($a, $b) {
+                if ($a['categoria'] == $b['categoria']) {
+                    return $a['ordinamento'] - $b['ordinamento'];
+                }
+                return strcmp($a['categoria'], $b['categoria']);
+            });
+
+            foreach ($servizi_disponibili as $servizio) {
+                $prezzo_display = $servizio['prezzo_default'] > 0
+                    ? number_format($servizio['prezzo_default'], 2, ',', '.') . ' &euro;'
+                    : 'Su richiesta';
+
+                $html .= '<tr>
+                    <td style="padding: 6px 8px;">' . esc_html($servizio['nome_servizio']);
+
+                if (!empty($servizio['descrizione'])) {
+                    $html .= '<br><small style="color: #666; font-size: 8px;">' . esc_html($servizio['descrizione']) . '</small>';
+                }
+
+                $html .= '</td>
+                    <td style="padding: 6px 8px; color: #666; font-size: 9px;">' . esc_html($servizio['categoria'] ?: '—') . '</td>
+                    <td style="padding: 6px 8px; text-align: right; font-weight: 600; color: #e91e63;">' . $prezzo_display . '</td>
+                </tr>';
+            }
+
+            $html .= '</tbody>
+                </table>
+                <p style="margin: 8px 0 0 0; font-size: 8px; color: #999; font-style: italic;">
+                    I servizi sopra elencati sono disponibili su richiesta. Contattaci per maggiori informazioni.
+                </p>
+            </div>';
+        }
+
+        // Footer
+        $html .= '<div class="footer">
+            <strong>' . esc_html($company_name) . '</strong><br>
+            ' . esc_html($company_address) . '<br>
+            ' . esc_html($company_piva) . ' - ' . esc_html($company_cf) . '<br>
+            Tel. ' . esc_html($company_phone) . ' - Email: ' . esc_html($company_email) . '
+        </div>
+
+</body>
+</html>';
+
+        return $html;
     }
 
     /**
@@ -98,37 +705,410 @@ class MM_PDF_Generator {
     }
 
     /**
+     * Genera HTML per allegato email (senza output diretto)
+     */
+    public static function generate_pdf_html_for_attachment($preventivo) {
+        // Impostazioni aziendali
+        $company_name = get_option('mm_preventivi_company_name', 'MONTERO MUSIC di Massimo Manca');
+        $company_address = get_option('mm_preventivi_company_address', 'Via Ofanto, 37 73047 Monteroni di Lecce (LE)');
+        $company_phone = get_option('mm_preventivi_company_phone', '333-7512343');
+        $company_email = get_option('mm_preventivi_company_email', 'info@massimomanca.it');
+        $company_piva = get_option('mm_preventivi_company_piva', 'P.I. 04867450753');
+        $company_cf = get_option('mm_preventivi_company_cf', 'C.F. MNCMSM79E01119H');
+        $company_logo = get_option('mm_preventivi_logo', '');
+
+        // Genera lo stesso HTML del PDF ma senza i pulsanti azione
+        ob_start();
+
+        // Usa generate_simple_html come base per l'allegato
+        echo self::generate_attachment_html($preventivo, $company_name, $company_address, $company_phone, $company_email, $company_piva, $company_cf, $company_logo);
+
+        return ob_get_clean();
+    }
+
+    /**
+     * Genera HTML per allegato (versione pulita senza pulsanti)
+     */
+    private static function generate_attachment_html($preventivo, $company_name, $company_address, $company_phone, $company_email, $company_piva, $company_cf, $company_logo) {
+        // Calcoli
+        $totale_servizi = floatval($preventivo['totale_servizi']);
+        $sconto_fisso = floatval($preventivo['sconto']);
+        $sconto_percentuale = floatval($preventivo['sconto_percentuale']);
+        $sconto_perc_importo = $totale_servizi * ($sconto_percentuale / 100);
+        $subtotale = $totale_servizi - $sconto_fisso - $sconto_perc_importo;
+
+        $enpals_committente = floatval($preventivo['enpals_committente']);
+        $iva = floatval($preventivo['iva']);
+        $totale = floatval($preventivo['totale']);
+
+        $applica_enpals = !empty($preventivo['applica_enpals']);
+        $applica_iva = !empty($preventivo['applica_iva']);
+
+        $servizi = isset($preventivo['servizi']) && is_array($preventivo['servizi']) ? $preventivo['servizi'] : array();
+        $acconti = isset($preventivo['acconti']) && is_array($preventivo['acconti']) ? $preventivo['acconti'] : array();
+
+        $totale_acconti = 0;
+        foreach ($acconti as $acconto) {
+            $totale_acconti += floatval($acconto['importo_acconto']);
+        }
+
+        $html = '<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preventivo ' . esc_html($preventivo['numero_preventivo']) . '</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+        .header img {
+            max-height: 80px;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        .header p {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        .content {
+            padding: 40px 30px;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #e91e63;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e91e63;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+        .info-box {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .info-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        .info-value {
+            font-size: 15px;
+            color: #333;
+            font-weight: 500;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th {
+            background: #e91e63;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .text-right { text-align: right; }
+        .totals-box {
+            background: linear-gradient(135deg, #f9f9f9 0%, #f0f0f0 100%);
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 15px;
+        }
+        .total-row.main {
+            font-size: 20px;
+            font-weight: 700;
+            color: #e91e63;
+            padding-top: 15px;
+            border-top: 2px solid #e91e63;
+            margin-top: 10px;
+        }
+        .footer {
+            background: #f5f5f5;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #e0e0e0;
+        }
+        .footer .company-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: #e91e63;
+            margin-bottom: 10px;
+        }
+        .footer p {
+            font-size: 13px;
+            color: #666;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">';
+
+        if (!empty($company_logo)) {
+            $html .= '<img src="' . esc_url($company_logo) . '" alt="Logo">';
+        }
+
+        $html .= '
+            <h1>PREVENTIVO</h1>
+            <p>N° ' . esc_html($preventivo['numero_preventivo']) . '</p>
+        </div>
+
+        <div class="content">
+            <div class="section">
+                <div class="section-title">Informazioni Evento</div>
+                <div class="info-grid">
+                    <div class="info-box">
+                        <div class="info-label">Cliente</div>
+                        <div class="info-value">' . esc_html($preventivo['sposi']) . '</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="info-label">Data Evento</div>
+                        <div class="info-value">' . date('d/m/Y', strtotime($preventivo['data_evento'])) . '</div>
+                    </div>';
+
+        if (!empty($preventivo['location'])) {
+            $html .= '
+                    <div class="info-box">
+                        <div class="info-label">Location</div>
+                        <div class="info-value">' . esc_html($preventivo['location']) . '</div>
+                    </div>';
+        }
+
+        if (!empty($preventivo['tipo_evento'])) {
+            $html .= '
+                    <div class="info-box">
+                        <div class="info-label">Tipo Evento</div>
+                        <div class="info-value">' . esc_html($preventivo['tipo_evento']) . '</div>
+                    </div>';
+        }
+
+        $html .= '
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Servizi Inclusi</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Servizio</th>
+                            <th class="text-right">Prezzo</th>
+                        </tr>
+                    </thead>
+                    <tbody>';
+
+        foreach ($servizi as $servizio) {
+            $prezzo = floatval($servizio['prezzo']);
+            $sconto_serv = isset($servizio['sconto']) ? floatval($servizio['sconto']) : 0;
+            $totale_serv = $prezzo - $sconto_serv;
+
+            $html .= '
+                        <tr>
+                            <td>' . esc_html($servizio['nome_servizio']) . '</td>
+                            <td class="text-right">€ ' . number_format($totale_serv, 2, ',', '.') . '</td>
+                        </tr>';
+        }
+
+        $html .= '
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="section">
+                <div class="totals-box">
+                    <div class="total-row">
+                        <span>Subtotale:</span>
+                        <span>€ ' . number_format($subtotale, 2, ',', '.') . '</span>
+                    </div>';
+
+        if ($applica_enpals && $enpals_committente > 0) {
+            $html .= '
+                    <div class="total-row">
+                        <span>ENPALS Committente:</span>
+                        <span>€ ' . number_format($enpals_committente, 2, ',', '.') . '</span>
+                    </div>';
+        }
+
+        if ($applica_iva && $iva > 0) {
+            $html .= '
+                    <div class="total-row">
+                        <span>IVA (22%):</span>
+                        <span>€ ' . number_format($iva, 2, ',', '.') . '</span>
+                    </div>';
+        }
+
+        $html .= '
+                    <div class="total-row main">
+                        <span>TOTALE:</span>
+                        <span>€ ' . number_format($totale, 2, ',', '.') . '</span>
+                    </div>
+                </div>
+            </div>';
+
+        if (!empty($acconti)) {
+            $html .= '
+            <div class="section">
+                <div class="section-title">Acconti Previsti</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th class="text-right">Importo</th>
+                        </tr>
+                    </thead>
+                    <tbody>';
+
+            foreach ($acconti as $acconto) {
+                $html .= '
+                        <tr>
+                            <td>' . date('d/m/Y', strtotime($acconto['data_acconto'])) . '</td>
+                            <td class="text-right">€ ' . number_format(floatval($acconto['importo_acconto']), 2, ',', '.') . '</td>
+                        </tr>';
+            }
+
+            $html .= '
+                        <tr style="font-weight: 700; border-top: 2px solid #e91e63;">
+                            <td>Totale Acconti</td>
+                            <td class="text-right">€ ' . number_format($totale_acconti, 2, ',', '.') . '</td>
+                        </tr>
+                        <tr>
+                            <td>Restante</td>
+                            <td class="text-right">€ ' . number_format($totale - $totale_acconti, 2, ',', '.') . '</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>';
+        }
+
+        if (!empty($preventivo['note'])) {
+            $html .= '
+            <div class="section">
+                <div class="section-title">Note</div>
+                <div style="background: #f9f9f9; padding: 15px; border-radius: 8px;">
+                    ' . nl2br(esc_html($preventivo['note'])) . '
+                </div>
+            </div>';
+        }
+
+        $html .= '
+        </div>
+
+        <div class="footer">
+            <div class="company-name">' . esc_html($company_name) . '</div>
+            <p>' . esc_html($company_address) . '</p>
+            <p>Tel. ' . esc_html($company_phone) . ' - Email: ' . esc_html($company_email) . '</p>
+            <p>' . esc_html($company_piva) . ' - ' . esc_html($company_cf) . '</p>
+            <p style="margin-top: 20px; font-size: 12px; color: #999;">
+                © ' . date('Y') . ' ' . esc_html($company_name) . '. Tutti i diritti riservati.
+            </p>
+        </div>
+    </div>
+</body>
+</html>';
+
+        return $html;
+    }
+
+    /**
      * Genera HTML semplice per il preventivo
      */
     private static function generate_simple_html($preventivo) {
         ob_start();
         ?>
         <!DOCTYPE html>
-        <html>
+        <html lang="it">
         <head>
             <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
             <title>Preventivo <?php echo esc_html($preventivo['numero_preventivo']); ?></title>
             <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
                 body {
                     font-family: Arial, sans-serif;
                     padding: 20px;
                     color: #333;
+                    background: #f5f5f5;
                 }
                 .header {
-                    background: #e91e63;
+                    background: linear-gradient(135deg, #e91e63 0%, #d81b60 100%);
                     color: white;
                     padding: 20px;
                     text-align: center;
                     margin-bottom: 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }
+                .header h1 {
+                    font-size: 24px;
+                    margin-bottom: 5px;
                 }
                 .section {
                     margin: 20px 0;
                     padding: 15px;
-                    background: #f9f9f9;
+                    background: white;
                     border-left: 4px solid #e91e63;
+                    border-radius: 4px;
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+                }
+                .section h2 {
+                    color: #e91e63;
+                    font-size: 18px;
+                    margin-bottom: 12px;
+                    padding-bottom: 8px;
+                    border-bottom: 2px solid #f8bbd0;
+                }
+                .section p {
+                    margin: 8px 0;
+                    line-height: 1.6;
                 }
                 .totale {
-                    font-size: 24px;
+                    font-size: 28px;
                     color: #e91e63;
                     font-weight: bold;
                 }
@@ -136,15 +1116,83 @@ class MM_PDF_Generator {
                     width: 100%;
                     border-collapse: collapse;
                     margin: 15px 0;
+                    background: white;
                 }
                 th, td {
-                    padding: 10px;
+                    padding: 12px;
                     text-align: left;
                     border-bottom: 1px solid #ddd;
                 }
                 th {
                     background: #e91e63;
                     color: white;
+                    font-weight: 600;
+                }
+                td:last-child {
+                    text-align: right;
+                }
+                .footer {
+                    text-align: center;
+                    margin-top: 40px;
+                    padding-top: 20px;
+                    border-top: 2px solid #e91e63;
+                    color: #666;
+                    font-size: 14px;
+                }
+
+                /* Mobile Optimization */
+                @media only screen and (max-width: 768px) {
+                    body {
+                        padding: 10px;
+                    }
+                    .header h1 {
+                        font-size: 20px;
+                    }
+                    .header p {
+                        font-size: 14px;
+                    }
+                    .section {
+                        padding: 12px;
+                        margin: 15px 0;
+                    }
+                    .section h2 {
+                        font-size: 16px;
+                    }
+                    .section p {
+                        font-size: 14px;
+                    }
+                    .totale {
+                        font-size: 24px;
+                    }
+                    table {
+                        font-size: 13px;
+                        display: block;
+                        overflow-x: auto;
+                        -webkit-overflow-scrolling: touch;
+                    }
+                    th, td {
+                        padding: 8px 6px;
+                        font-size: 12px;
+                    }
+                }
+
+                @media only screen and (max-width: 375px) {
+                    .header h1 {
+                        font-size: 18px;
+                    }
+                    .section h2 {
+                        font-size: 14px;
+                    }
+                    .totale {
+                        font-size: 22px;
+                    }
+                    table {
+                        font-size: 12px;
+                    }
+                    th, td {
+                        padding: 6px 4px;
+                        font-size: 11px;
+                    }
                 }
             </style>
         </head>
@@ -205,8 +1253,8 @@ class MM_PDF_Generator {
             </div>
             <?php endif; ?>
 
-            <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #e91e63;">
-                <p><?php echo esc_html(get_bloginfo('name')); ?></p>
+            <div class="footer">
+                <p><strong><?php echo esc_html(get_bloginfo('name')); ?></strong></p>
                 <p><?php echo esc_html(get_bloginfo('description')); ?></p>
             </div>
         </body>
@@ -395,13 +1443,13 @@ class MM_PDF_Generator {
         $html_tipo_evento = '
         <table style="width: 100%; margin-bottom: 10px; border-collapse: collapse;">
             <tr>
-                <td style="width: 70%; padding: 8px 12px; background: linear-gradient(135deg, #e91e63 0%, #d81b60 100%); border-radius: 6px 0 0 6px; box-shadow: 0 2px 6px rgba(233, 30, 99, 0.3);">
-                    <p style="margin: 0; font-size: 8px; color: rgba(255,255,255,0.85); font-weight: 600; letter-spacing: 0.3px;">TIPO DI EVENTO RICHIESTO</p>
-                    <p style="margin: 3px 0 0 0; font-size: 12px; color: #ffffff; font-weight: bold; letter-spacing: 0.3px;">' . esc_html($categoria_icona) . ' ' . strtoupper(esc_html($categoria_display)) . '</p>
+                <td style="width: 70%; padding: 6px 12px; background: linear-gradient(135deg, #e91e63 0%, #d81b60 100%); border-radius: 6px 0 0 6px; box-shadow: 0 2px 6px rgba(233, 30, 99, 0.3);">
+                    <p style="margin: 0; font-size: 9px; color: #ffffff; font-weight: 600; letter-spacing: 0.3px; display: inline;">TIPO DI EVENTO RICHIESTO: </p>
+                    <p style="margin: 0; font-size: 11px; color: #ffffff; font-weight: bold; letter-spacing: 0.3px; display: inline;">' . esc_html($categoria_icona) . ' ' . strtoupper(esc_html($categoria_display)) . '</p>
                 </td>
-                <td style="width: 30%; padding: 8px 12px; background: ' . $stato_color . '; border-radius: 0 6px 6px 0; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15); text-align: center;">
-                    <p style="margin: 0; font-size: 8px; color: rgba(255,255,255,0.85); font-weight: 600; letter-spacing: 0.3px;">STATO</p>
-                    <p style="margin: 3px 0 0 0; font-size: 12px; color: #ffffff; font-weight: bold; letter-spacing: 0.3px;">' . strtoupper(esc_html($stato_label)) . '</p>
+                <td style="width: 30%; padding: 6px 12px; background: ' . $stato_color . '; border-radius: 0 6px 6px 0; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15); text-align: center;">
+                    <p style="margin: 0; font-size: 9px; color: #ffffff; font-weight: 600; letter-spacing: 0.3px; display: inline;">STATO: </p>
+                    <p style="margin: 0; font-size: 11px; color: #ffffff; font-weight: bold; letter-spacing: 0.3px; display: inline;">' . strtoupper(esc_html($stato_label)) . '</p>
                 </td>
             </tr>
         </table>
@@ -462,16 +1510,16 @@ class MM_PDF_Generator {
             }
         }
 
-        // Servizi extra come fascia elegante e sottile
+        // Servizi extra come fascia elegante con checkbox
         $extra_array = !empty($preventivo['servizi_extra']) ? (is_array($preventivo['servizi_extra']) ? $preventivo['servizi_extra'] : explode(',', $preventivo['servizi_extra'])) : array();
         if (!empty($extra_array)) {
-            $html_boxes = '<div style="margin: 10px 0; padding: 8px 12px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 6px; border: 1px solid #4caf50;">';
+            $html_boxes = '<div style="margin: 15px 0; padding: 12px 15px; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); border-left: 4px solid #9c27b0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08);">';
 
             $services_html = array();
             foreach ($extra_array as $item) {
                 $item = trim($item);
                 if (!empty($item)) {
-                    $services_html[] = '<span style="display: inline-block; margin: 2px 4px; padding: 4px 10px; background: #ffffff; border: 1px solid #4caf50; border-radius: 4px; font-size: 9px; font-weight: 600; color: #2e7d32;">✓ ' . esc_html($item) . '</span>';
+                    $services_html[] = '<span style="display: inline-block; margin: 4px 6px; padding: 6px 12px; background: #ffffff; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 9px; font-weight: 500; color: #424242; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"><span style="display: inline-block; width: 12px; height: 12px; background: #9c27b0; border-radius: 3px; margin-right: 5px; text-align: center; line-height: 12px; color: white; font-size: 8px; vertical-align: middle;">✓</span>' . esc_html($item) . '</span>';
                 }
             }
 
@@ -482,7 +1530,7 @@ class MM_PDF_Generator {
 
         // Servizi
         $html_servizi = '
-        <h3 style="color: #e91e63; font-size: 13px; margin: 20px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #f8bbd0;">Servizi Richiesti</h3>
+        <h3 style="color: #e91e63; font-size: 13px; margin: 20px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #f8bbd0;">Dettaglio Prezzi</h3>
         <table style="width: 100%; font-size: 10px; border-collapse: collapse; margin-bottom: 15px;">
             <thead>
                 <tr style="background-color: #e91e63; color: white;">
@@ -519,16 +1567,6 @@ class MM_PDF_Generator {
         </table>';
 
         $pdf->writeHTML($html_servizi, true, false, true, false, '');
-
-        // Servizi extra
-        if (!empty($preventivo['servizi_extra'])) {
-            $extra_list = is_array($preventivo['servizi_extra']) ? implode(', ', $preventivo['servizi_extra']) : $preventivo['servizi_extra'];
-            $html_extra = '
-            <h3 style="color: #e91e63; font-size: 13px; margin: 15px 0 10px 0; padding-bottom: 5px; border-bottom: 2px solid #f8bbd0;">Servizi Aggiuntivi</h3>
-            <p style="font-size: 10px; padding: 10px; background-color: #fafafa; border-left: 4px solid #e91e63;">' . esc_html($extra_list) . '</p>
-            ';
-            $pdf->writeHTML($html_extra, true, false, true, false, '');
-        }
 
         // Note
         if (!empty($preventivo['note'])) {
@@ -709,16 +1747,36 @@ class MM_PDF_Generator {
         $pdf->writeHTML($html_form_cliente, true, false, true, false, '');
         */
 
-        // Acconto
-        if (!empty($preventivo['data_acconto']) && !empty($preventivo['importo_acconto'])) {
-            $importo_acconto = floatval($preventivo['importo_acconto']);
-            $restante = $totale - $importo_acconto;
+        // Acconti multipli
+        $acconti = isset($preventivo['acconti']) && is_array($preventivo['acconti']) ? $preventivo['acconti'] : array();
 
-            $html_acconto = '
-            <table style="width: 100%; margin-top: 15px; font-size: 10px; background-color: #e8f5e9; padding: 10px; border-radius: 5px;">
+        // Retrocompatibilità: se non ci sono acconti nella nuova tabella, usa i vecchi campi
+        if (empty($acconti) && !empty($preventivo['data_acconto']) && !empty($preventivo['importo_acconto'])) {
+            $acconti = array(array(
+                'data_acconto' => $preventivo['data_acconto'],
+                'importo_acconto' => $preventivo['importo_acconto']
+            ));
+        }
+
+        if (!empty($acconti)) {
+            $totale_acconti = 0;
+            $html_acconto = '<table style="width: 100%; margin-top: 15px; font-size: 10px; background-color: #e8f5e9; padding: 10px; border-radius: 5px;">';
+
+            foreach ($acconti as $acconto) {
+                $importo = floatval($acconto['importo_acconto']);
+                $totale_acconti += $importo;
+                $html_acconto .= '
                 <tr>
-                    <td style="padding: 5px;"><strong style="color: #2e7d32;">Acconto del ' . date('d/m/Y', strtotime($preventivo['data_acconto'])) . ':</strong></td>
-                    <td style="padding: 5px; text-align: right; font-weight: bold; color: #2e7d32;">€ ' . number_format($importo_acconto, 2, ',', '.') . '</td>
+                    <td style="padding: 5px;"><strong style="color: #2e7d32;">Acconto del ' . date('d/m/Y', strtotime($acconto['data_acconto'])) . ':</strong></td>
+                    <td style="padding: 5px; text-align: right; font-weight: bold; color: #2e7d32;">€ ' . number_format($importo, 2, ',', '.') . '</td>
+                </tr>';
+            }
+
+            $restante = $totale - $totale_acconti;
+            $html_acconto .= '
+                <tr style="border-top: 2px solid #4caf50;">
+                    <td style="padding: 5px;"><strong>Totale Acconti:</strong></td>
+                    <td style="padding: 5px; text-align: right; font-weight: bold; color: #2e7d32;">€ ' . number_format($totale_acconti, 2, ',', '.') . '</td>
                 </tr>
                 <tr>
                     <td style="padding: 5px;"><strong>Restante da saldare:</strong></td>
@@ -758,6 +1816,14 @@ class MM_PDF_Generator {
         $company_cf = get_option('mm_preventivi_company_cf', 'C.F. MNCMSM79E01119H');
         $company_logo = get_option('mm_preventivi_logo', '');
 
+        // Genera link pubblico per condivisione
+        if (method_exists('MM_Frontend', 'get_public_link')) {
+            $public_link = MM_Frontend::get_public_link($preventivo['id']);
+        } else {
+            // Fallback: usa link admin (richiede login)
+            $public_link = admin_url('admin-ajax.php?action=mm_view_pdf&id=' . $preventivo['id'] . '&nonce=' . wp_create_nonce('mm_preventivi_view_pdf'));
+        }
+
         // Header per download HTML
         header('Content-Type: text/html; charset=UTF-8');
         header('Content-Disposition: inline; filename="Preventivo_' . $preventivo['numero_preventivo'] . '.html"');
@@ -781,12 +1847,14 @@ class MM_PDF_Generator {
         .subtitle { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 25px 0; }
         .tipo-evento-stato-box { display: flex; margin: 15px 0 10px 0; border-radius: 6px; overflow: hidden; box-shadow: 0 2px 8px rgba(233, 30, 99, 0.25); }
-        .tipo-evento-left { flex: 70%; padding: 10px 15px; background: linear-gradient(135deg, #e91e63 0%, #d81b60 100%); }
-        .tipo-evento-right { flex: 30%; padding: 10px 15px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; color: white; }
-        .tipo-evento-left p:first-child, .tipo-evento-right p:first-child { font-size: 9px; margin: 0; color: rgba(255,255,255,0.85); font-weight: 600; letter-spacing: 0.3px; }
-        .tipo-evento-left p:last-child, .tipo-evento-right p:last-child { font-size: 14px; margin: 4px 0 0 0; color: #ffffff; font-weight: bold; letter-spacing: 0.3px; }
+        .tipo-evento-left { flex: 70%; padding: 6px 15px; background: linear-gradient(135deg, #e91e63 0%, #d81b60 100%); display: flex; align-items: center; }
+        .tipo-evento-right { flex: 30%; padding: 6px 15px; display: flex; justify-content: center; align-items: center; text-align: center; color: white; }
+        .tipo-evento-left p, .tipo-evento-right p { font-size: 11px; margin: 0; color: #ffffff; font-weight: 600; letter-spacing: 0.3px; }
+        .tipo-evento-left p:first-child, .tipo-evento-right p:first-child { font-size: 9px; font-weight: 600; }
         .validita-box { font-size: 11px; color: #666; font-style: italic; margin: 8px 0 15px 0; padding: 10px; background: #fffaf0; border-left: 3px solid #ff9800; border-radius: 4px; }
-        .service-tag { display: inline-block; margin: 5px 7px; padding: 12px 18px; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); border: 2px solid #2196f3; border-radius: 8px; font-size: 12px; font-weight: 600; color: #0d47a1; box-shadow: 0 2px 4px rgba(33, 150, 243, 0.2); }
+        .service-tag { display: inline-block; margin: 4px 6px; padding: 6px 12px; background: #ffffff; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 11px; font-weight: 500; color: #424242; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .service-tag .checkbox { display: inline-block; width: 14px; height: 14px; background: #9c27b0; border-radius: 3px; margin-right: 6px; text-align: center; line-height: 14px; color: white; font-size: 10px; vertical-align: middle; }
+        .services-extra-box { margin: 15px 0; padding: 12px 15px; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); border-left: 4px solid #9c27b0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
         .totale-evidenziato { background-color: #fff9c4 !important; }
         .tipo-evento-right.stato-bozza { background: #ff9800; }
         .tipo-evento-right.stato-attivo { background: #4caf50; }
@@ -859,11 +1927,89 @@ class MM_PDF_Generator {
             border-bottom: 2px solid #f8bbd0;
         }
 
-        /* Pulsante Stampa */
-        .print-button {
+        /* Pulsanti Azioni */
+        .action-buttons {
             position: fixed;
-            top: 20px;
-            right: 20px;
+            top: 10px;
+            right: 10px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .action-btn {
+            background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(233, 30, 99, 0.3);
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            justify-content: center;
+            min-width: 140px;
+        }
+
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(233, 30, 99, 0.4);
+        }
+
+        .action-btn:active {
+            transform: translateY(0);
+        }
+
+        .action-btn.whatsapp-btn {
+            background: linear-gradient(135deg, #25d366 0%, #128c7e 100%);
+            box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+        }
+
+        .action-btn.whatsapp-btn:hover {
+            box-shadow: 0 6px 20px rgba(37, 211, 102, 0.4);
+        }
+
+        .action-btn.email-btn {
+            background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+            box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
+        }
+
+        .action-btn.email-btn:hover {
+            box-shadow: 0 6px 20px rgba(33, 150, 243, 0.4);
+        }
+
+        .action-btn.share-btn {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
+        }
+
+        .action-btn.share-btn:hover {
+            box-shadow: 0 6px 20px rgba(255, 152, 0, 0.4);
+        }
+
+        .action-btn.pdf-btn {
+            background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);
+            box-shadow: 0 4px 12px rgba(211, 47, 47, 0.3);
+        }
+
+        .action-btn.pdf-btn:hover {
+            box-shadow: 0 6px 20px rgba(211, 47, 47, 0.4);
+        }
+
+        .action-btn.pdf-btn:disabled {
+            background: #ccc;
+            cursor: wait;
+            box-shadow: none;
+        }
+
+        /* Pulsante Stampa (deprecato, ora dentro action-buttons) */
+        .print-button {
             background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);
             color: white;
             border: none;
@@ -873,12 +2019,263 @@ class MM_PDF_Generator {
             font-weight: 600;
             cursor: pointer;
             box-shadow: 0 4px 12px rgba(233, 30, 99, 0.3);
-            z-index: 1000;
             transition: all 0.3s;
         }
         .print-button:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(233, 30, 99, 0.4);
+        }
+
+        /* Ottimizzazione Mobile */
+        @media only screen and (max-width: 768px) {
+            body {
+                padding: 10px !important;
+            }
+
+            .container {
+                padding: 15px !important;
+                box-shadow: none !important;
+            }
+
+            .header {
+                flex-direction: column !important;
+                text-align: center !important;
+            }
+
+            .header-left {
+                flex-direction: column !important;
+                align-items: center !important;
+                gap: 10px !important;
+                margin-bottom: 15px !important;
+            }
+
+            .header-right {
+                text-align: center !important;
+            }
+
+            .logo {
+                max-height: 60px !important;
+            }
+
+            .preventivo-title {
+                font-size: 16px !important;
+            }
+
+            .preventivo-numero {
+                font-size: 13px !important;
+            }
+
+            /* Info grid diventa stack verticale su mobile */
+            .info-grid {
+                grid-template-columns: 1fr !important;
+                gap: 15px !important;
+            }
+
+            .info-box {
+                padding: 12px !important;
+            }
+
+            .info-box-title {
+                font-size: 12px !important;
+            }
+
+            .info-row {
+                font-size: 12px !important;
+            }
+
+            /* Tipo evento e stato stack verticale */
+            .tipo-evento-stato-box {
+                flex-direction: column !important;
+            }
+
+            .tipo-evento-left,
+            .tipo-evento-right {
+                flex: 100% !important;
+                padding: 10px 12px !important;
+                border-radius: 0 !important;
+            }
+
+            .tipo-evento-left {
+                border-radius: 6px 6px 0 0 !important;
+            }
+
+            .tipo-evento-right {
+                border-radius: 0 0 6px 6px !important;
+            }
+
+            .tipo-evento-left p,
+            .tipo-evento-right p {
+                font-size: 12px !important;
+            }
+
+            /* Tabelle responsive con scroll orizzontale */
+            table {
+                font-size: 11px !important;
+                display: block !important;
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+                white-space: nowrap !important;
+            }
+
+            thead, tbody, tr {
+                display: table !important;
+                width: 100% !important;
+            }
+
+            th, td {
+                padding: 8px 6px !important;
+                font-size: 11px !important;
+            }
+
+            /* Heading più piccoli */
+            h2 {
+                font-size: 14px !important;
+                margin: 20px 0 10px !important;
+            }
+
+            /* Service tags più piccoli */
+            .service-tag {
+                font-size: 10px !important;
+                padding: 5px 10px !important;
+                margin: 3px 4px !important;
+            }
+
+            .service-tag .checkbox {
+                width: 12px !important;
+                height: 12px !important;
+                line-height: 12px !important;
+                font-size: 9px !important;
+            }
+
+            /* Two column grid diventa single column */
+            .two-column-grid {
+                grid-template-columns: 1fr !important;
+                gap: 15px !important;
+            }
+
+            .column-box {
+                padding: 12px !important;
+            }
+
+            .column-box h3 {
+                font-size: 13px !important;
+            }
+
+            .column-box table {
+                font-size: 11px !important;
+            }
+
+            /* Totali più compatti */
+            .totals {
+                padding: 12px !important;
+            }
+
+            .totals td {
+                font-size: 12px !important;
+                padding: 6px 0 !important;
+            }
+
+            .total-row {
+                font-size: 16px !important;
+            }
+
+            /* Note e acconti */
+            .note, .acconto {
+                padding: 10px !important;
+                font-size: 11px !important;
+            }
+
+            /* Footer */
+            .footer {
+                font-size: 10px !important;
+                padding-top: 15px !important;
+            }
+
+            /* Action buttons su mobile */
+            .action-buttons {
+                top: 5px !important;
+                right: 5px !important;
+                gap: 6px !important;
+            }
+
+            .action-btn {
+                padding: 10px 14px !important;
+                font-size: 12px !important;
+                min-width: 120px !important;
+            }
+
+            .print-button {
+                position: fixed !important;
+                top: 10px !important;
+                right: 10px !important;
+                padding: 10px 16px !important;
+                font-size: 13px !important;
+                z-index: 9999 !important;
+            }
+
+            /* Checkbox row */
+            .checkbox-row {
+                flex-direction: column !important;
+                padding: 10px !important;
+                gap: 10px !important;
+            }
+
+            .checkbox-item {
+                font-size: 12px !important;
+            }
+
+            /* Validità box */
+            .validita-box {
+                font-size: 10px !important;
+                padding: 8px !important;
+            }
+        }
+
+        /* Ottimizzazione per schermi molto piccoli (< 375px) */
+        @media only screen and (max-width: 375px) {
+            body {
+                padding: 5px !important;
+            }
+
+            .container {
+                padding: 10px !important;
+            }
+
+            .preventivo-title {
+                font-size: 14px !important;
+            }
+
+            .preventivo-numero {
+                font-size: 12px !important;
+            }
+
+            .info-box-title {
+                font-size: 11px !important;
+            }
+
+            table {
+                font-size: 10px !important;
+            }
+
+            th, td {
+                padding: 6px 4px !important;
+                font-size: 10px !important;
+            }
+
+            h2 {
+                font-size: 13px !important;
+            }
+
+            .action-btn {
+                padding: 8px 12px !important;
+                font-size: 11px !important;
+                min-width: 100px !important;
+            }
+
+            .print-button {
+                font-size: 12px !important;
+                padding: 8px 12px !important;
+            }
         }
 
         /* Ottimizzazione Stampa A4 */
@@ -902,7 +2299,8 @@ class MM_PDF_Generator {
                 page-break-after: avoid;
             }
 
-            /* Nascondi pulsante stampa */
+            /* Nascondi pulsanti azione durante stampa */
+            .action-buttons,
             .print-button {
                 display: none !important;
             }
@@ -932,21 +2330,22 @@ class MM_PDF_Generator {
             }
 
             .tipo-evento-left {
-                padding: 12px 15px !important;
+                padding: 6px 15px !important;
             }
 
             .tipo-evento-right {
-                padding: 12px 15px !important;
+                padding: 6px 15px !important;
+            }
+
+            .tipo-evento-left p,
+            .tipo-evento-right p {
+                font-size: 11px !important;
+                display: inline !important;
             }
 
             .tipo-evento-left p:first-child,
             .tipo-evento-right p:first-child {
-                font-size: 10px !important;
-            }
-
-            .tipo-evento-left p:last-child,
-            .tipo-evento-right p:last-child {
-                font-size: 16px !important;
+                font-size: 9px !important;
             }
 
             h2 {
@@ -1067,10 +2466,24 @@ class MM_PDF_Generator {
 </head>
 <body>
     <div class="container">
-        <!-- Pulsante stampa (visibile solo su schermo) -->
-        <button onclick="window.print()" class="print-button">
-            🖨️ Stampa Preventivo
-        </button>
+        <!-- Pulsanti Azione (visibili solo su schermo) -->
+        <div class="action-buttons">
+            <button onclick="window.print()" class="action-btn">
+                🖨️ Stampa
+            </button>
+            <button onclick="sharePreventivo()" class="action-btn share-btn">
+                📤 Condividi
+            </button>
+            <button onclick="downloadPDF()" class="action-btn pdf-btn">
+                📄 PDF
+            </button>
+            <a href="mailto:' . esc_attr($preventivo['email']) . '?subject=Preventivo ' . esc_attr($preventivo['numero_preventivo']) . '&body=Gentile Cliente, trova il preventivo al seguente link: ' . urlencode($public_link) . '" class="action-btn email-btn">
+                ✉️ Email
+            </a>
+            <a href="https://wa.me/' . preg_replace('/[^0-9+]/', '', $preventivo['telefono']) . '?text=' . urlencode('🎉 Ciao! Ti invio il preventivo ' . $preventivo['numero_preventivo'] . '. Puoi visualizzarlo qui: ' . $public_link) . '" target="_blank" class="action-btn whatsapp-btn">
+                💬 WhatsApp
+            </a>
+        </div>
 
         <div class="header">
             <div class="header-left">';
@@ -1105,12 +2518,12 @@ class MM_PDF_Generator {
         <!-- Box Tipo Evento e Stato -->
         <div class="tipo-evento-stato-box">
             <div class="tipo-evento-left">
-                <p>TIPO DI EVENTO RICHIESTO</p>
-                <p>' . esc_html($categoria_icona) . ' ' . strtoupper(esc_html($categoria_display)) . '</p>
+                <p style="display: inline; margin-right: 8px;">TIPO DI EVENTO RICHIESTO:</p>
+                <p style="display: inline;">' . esc_html($categoria_icona) . ' ' . strtoupper(esc_html($categoria_display)) . '</p>
             </div>
             <div class="tipo-evento-right stato-' . esc_attr($stato) . '">
-                <p>STATO</p>
-                <p>' . strtoupper(esc_html($stato_label)) . '</p>
+                <p style="display: inline; margin-right: 8px;">STATO:</p>
+                <p style="display: inline;">' . strtoupper(esc_html($stato_label)) . '</p>
             </div>
         </div>
 
@@ -1149,50 +2562,21 @@ class MM_PDF_Generator {
             }
         }
 
-        // Servizi extra come fascia elegante e sottile
+        // Servizi extra come fascia elegante con checkbox
         $extra_array_html = !empty($preventivo['servizi_extra']) ? (is_array($preventivo['servizi_extra']) ? $preventivo['servizi_extra'] : explode(',', $preventivo['servizi_extra'])) : array();
         if (!empty($extra_array_html)) {
-            echo '<div style="margin: 10px 0; padding: 8px 12px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 6px; border: 1px solid #4caf50;">';
+            echo '<div style="margin: 15px 0; padding: 12px 15px; background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); border-radius: 8px; border-left: 4px solid #9c27b0; box-shadow: 0 2px 4px rgba(0,0,0,0.08);">';
 
             foreach ($extra_array_html as $item) {
                 $item = trim($item);
                 if (!empty($item)) {
-                    echo '<span style="display: inline-block; margin: 2px 4px; padding: 4px 10px; background: #ffffff; border: 1px solid #4caf50; border-radius: 4px; font-size: 11px; font-weight: 600; color: #2e7d32;">✓ ' . esc_html($item) . '</span>';
+                    echo '<span style="display: inline-block; margin: 4px 6px; padding: 6px 12px; background: #ffffff; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 11px; font-weight: 500; color: #424242; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <span style="display: inline-block; width: 14px; height: 14px; background: #9c27b0; border-radius: 3px; margin-right: 6px; text-align: center; line-height: 14px; color: white; font-size: 10px; vertical-align: middle;">✓</span>' . esc_html($item) . '</span>';
                 }
             }
 
             echo '</div>';
         }
-
-        // Lista servizi in formato compatto
-        echo '<h2>Servizi Richiesti</h2>
-        <div class="services-list">';
-
-        $servizi_con_prezzo = array();
-        $servizi_senza_prezzo = array();
-
-        foreach ($preventivo['servizi'] as $servizio) {
-            $prezzo = floatval($servizio['prezzo']);
-            if ($prezzo > 0) {
-                $servizi_con_prezzo[] = $servizio;
-            } else {
-                $servizi_senza_prezzo[] = $servizio;
-            }
-        }
-
-        // Mostra tutti i servizi come tag
-        foreach ($preventivo['servizi'] as $servizio) {
-            $prezzo = floatval($servizio['prezzo']);
-            $nome = esc_html($servizio['nome_servizio']);
-
-            if ($prezzo > 0) {
-                echo '<span class="service-item" style="background: #e3f2fd; border: 1px solid #2196f3; color: #0d47a1; font-weight: 500;">' . $nome . '</span>';
-            } else {
-                echo '<span class="service-item">' . $nome . '</span>';
-            }
-        }
-
-        echo '</div>';
 
         // Verifica se esiste almeno uno sconto tra i servizi
         $ha_sconti = false;
@@ -1276,9 +2660,22 @@ class MM_PDF_Generator {
         $evidenzia_totale_servizi = ($importo_sconto == 0);
         $style_totale_servizi = $evidenzia_totale_servizi ? 'background-color: #fff9c4;' : '';
 
-        // Layout a due colonne: Totali (sinistra) e Note (destra)
+        // Layout a due colonne: Note (sinistra) e Totali (destra)
         echo '<div class="two-column-grid">
-            <!-- Colonna SINISTRA: Totali -->
+            <!-- Colonna SINISTRA: Note -->
+            <div class="column-box">';
+
+        if (!empty($preventivo['note'])) {
+            echo '<h3>📝 Note</h3>
+            <div style="line-height: 1.6; font-size: 12px;">' . nl2br(esc_html($preventivo['note'])) . '</div>';
+        } else {
+            echo '<h3>📝 Note</h3>
+            <p style="color: #999; font-style: italic; font-size: 12px;">Nessuna nota aggiuntiva</p>';
+        }
+
+        echo '</div>
+
+            <!-- Colonna DESTRA: Totali -->
             <div class="column-box">
                 <h3>💰 Riepilogo Importi</h3>
                 <table style="width: 100%; margin: 0; font-size: 12px; border: none;">
@@ -1314,19 +2711,6 @@ class MM_PDF_Generator {
                     </tr>
                 </table>
             </div>
-
-            <!-- Colonna DESTRA: Note -->
-            <div class="column-box">';
-
-        if (!empty($preventivo['note'])) {
-            echo '<h3>📝 Note</h3>
-            <div style="line-height: 1.6; font-size: 12px;">' . nl2br(esc_html($preventivo['note'])) . '</div>';
-        } else {
-            echo '<h3>📝 Note</h3>
-            <p style="color: #999; font-style: italic; font-size: 12px;">Nessuna nota aggiuntiva</p>';
-        }
-
-        echo '  </div>
         </div>';
 
         // Validità preventivo (se non confermato) - DOPO i totali e note
@@ -1390,13 +2774,34 @@ class MM_PDF_Generator {
         </div>';
         */
 
-        if (!empty($preventivo['data_acconto']) && !empty($preventivo['importo_acconto']) && floatval($preventivo['importo_acconto']) > 0) {
-            $importo_acconto = floatval($preventivo['importo_acconto']);
-            $restante = $totale - $importo_acconto;
-            echo '<div class="acconto" style="margin-top: 15px; padding: 10px; font-size: 11px;">
-                <p style="font-size: 11px;"><strong>Acconto del ' . date('d/m/Y', strtotime($preventivo['data_acconto'])) . ':</strong> € ' . number_format($importo_acconto, 2, ',', '.') . '</p>
-                <p style="margin-top: 6px; font-size: 11px;"><strong>Restante da saldare:</strong> € ' . number_format($restante, 2, ',', '.') . '</p>
-            </div>';
+        // Acconti multipli
+        $acconti_html = isset($preventivo['acconti']) && is_array($preventivo['acconti']) ? $preventivo['acconti'] : array();
+
+        // Retrocompatibilità: se non ci sono acconti nella nuova tabella, usa i vecchi campi
+        if (empty($acconti_html) && !empty($preventivo['data_acconto']) && !empty($preventivo['importo_acconto']) && floatval($preventivo['importo_acconto']) > 0) {
+            $acconti_html = array(array(
+                'data_acconto' => $preventivo['data_acconto'],
+                'importo_acconto' => $preventivo['importo_acconto']
+            ));
+        }
+
+        if (!empty($acconti_html)) {
+            echo '<div class="acconto" style="margin-top: 15px; padding: 10px; font-size: 11px;">';
+            $totale_acconti_html = 0;
+
+            foreach ($acconti_html as $acconto_item) {
+                $importo = floatval($acconto_item['importo_acconto']);
+                $totale_acconti_html += $importo;
+                echo '<p style="font-size: 11px; margin: 4px 0;"><strong>Acconto del ' . date('d/m/Y', strtotime($acconto_item['data_acconto'])) . ':</strong> € ' . number_format($importo, 2, ',', '.') . '</p>';
+            }
+
+            if (count($acconti_html) > 1) {
+                echo '<p style="font-size: 11px; margin: 8px 0 4px 0; padding-top: 8px; border-top: 2px solid #4caf50;"><strong>Totale Acconti:</strong> € ' . number_format($totale_acconti_html, 2, ',', '.') . '</p>';
+            }
+
+            $restante = $totale - $totale_acconti_html;
+            echo '<p style="font-size: 11px; margin: 4px 0;"><strong>Restante da saldare:</strong> € ' . number_format($restante, 2, ',', '.') . '</p>';
+            echo '</div>';
         }
 
         // Sezione Servizi Disponibili (non selezionati)
@@ -1466,8 +2871,103 @@ class MM_PDF_Generator {
     </div>
 
     <script>
+        // Link pubblico per condivisione
+        const publicLink = \'' . esc_js($public_link) . '\';
+        const numeroPreventivo = \'' . esc_js($preventivo['numero_preventivo']) . '\';
+        const preventivoId = ' . intval($preventivo['id']) . ';
+        const pdfDownloadUrl = \'' . esc_js(admin_url('admin-ajax.php')) . '\';
+
+        // Funzione download PDF (genera PDF reale lato server)
+        function downloadPDF() {
+            const btn = document.querySelector(\'.pdf-btn\');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = \'⏳ Generando...\';
+            btn.disabled = true;
+
+            // Estrai token dall\'URL corrente se presente
+            const urlParts = window.location.pathname.split(\'/\');
+            let token = \'\';
+            if (urlParts.length >= 4 && urlParts[1] === \'preventivo\') {
+                token = urlParts[3] || \'\';
+            }
+
+            // Costruisci URL per download PDF
+            let downloadUrl = pdfDownloadUrl + \'?action=mm_download_pdf&id=\' + preventivoId;
+            if (token) {
+                downloadUrl += \'&token=\' + token;
+            }
+
+            // Apri in nuova finestra per scaricare
+            window.location.href = downloadUrl;
+
+            // Ripristina pulsante dopo un breve delay
+            setTimeout(function() {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }, 2000);
+        }
+
+        // Funzione condivisione con Web Share API (o fallback)
+        function sharePreventivo() {
+            const shareData = {
+                title: \'Preventivo ' . esc_js($preventivo['numero_preventivo']) . '\',
+                text: \'Preventivo per ' . esc_js($preventivo['sposi']) . ' - Evento del ' . date('d/m/Y', strtotime($preventivo['data_evento'])) . '\',
+                url: publicLink
+            };
+
+            // Controlla se il browser supporta Web Share API
+            if (navigator.share) {
+                navigator.share(shareData)
+                    .then(() => console.log(\'Condivisione riuscita\'))
+                    .catch((error) => console.log(\'Errore condivisione:\', error));
+            } else {
+                // Fallback: copia URL negli appunti
+                const tempInput = document.createElement(\'input\');
+                tempInput.value = publicLink;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand(\'copy\');
+                document.body.removeChild(tempInput);
+
+                alert(\'Link pubblico copiato negli appunti!\\n\\nCondividi questo link per mostrare il preventivo.\');
+            }
+        }
+
         // Auto-print on load (opzionale)
         // window.onload = function() { window.print(); }
+
+        // Aggiusta scroll delle tabelle su mobile
+        document.addEventListener(\'DOMContentLoaded\', function() {
+            const tables = document.querySelectorAll(\'table\');
+            tables.forEach(table => {
+                // Touch scroll ottimizzato
+                let isDown = false;
+                let startX;
+                let scrollLeft;
+
+                table.addEventListener(\'mousedown\', (e) => {
+                    isDown = true;
+                    startX = e.pageX - table.offsetLeft;
+                    scrollLeft = table.scrollLeft;
+                });
+
+                table.addEventListener(\'mouseleave\', () => {
+                    isDown = false;
+                });
+
+                table.addEventListener(\'mouseup\', () => {
+                    isDown = false;
+                });
+
+                table.addEventListener(\'mousemove\', (e) => {
+                    if (!isDown) return;
+                    e.preventDefault();
+                    const x = e.pageX - table.offsetLeft;
+                    const walk = (x - startX) * 2;
+                    table.scrollLeft = scrollLeft - walk;
+                });
+            });
+        });
     </script>
 </body>
 </html>';

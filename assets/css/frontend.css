@@ -1255,6 +1255,26 @@
     box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
 }
 
+.mm-card-btn-email {
+    background: linear-gradient(135deg, #2196f3 0%, #1565c0 100%);
+    color: white;
+}
+
+.mm-card-btn-email:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
+}
+
+.mm-card-btn-whatsapp {
+    background: linear-gradient(135deg, #25d366 0%, #128c7e 100%);
+    color: white;
+}
+
+.mm-card-btn-whatsapp:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+}
+
 .mm-card-btn-accept {
     background: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%);
     color: white;
@@ -1600,5 +1620,647 @@
 
     .mm-card-btn {
         width: 100%;
+    }
+
+    /* Navigation mobile */
+    .mm-nav-bar {
+        flex-direction: column;
+        padding: 10px;
+        gap: 10px;
+    }
+
+    .mm-nav-left,
+    .mm-nav-center,
+    .mm-nav-right {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .mm-nav-center {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .mm-nav-btn {
+        width: 100%;
+        padding: 12px 16px;
+        font-size: 14px;
+        min-height: 44px; /* Touch target iOS/Android */
+    }
+
+    /* Header mobile */
+    .mm-page-header h1 {
+        font-size: 24px;
+    }
+
+    .mm-page-header p {
+        font-size: 14px;
+    }
+
+    /* Quick stats mobile */
+    .mm-quick-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        padding: 15px;
+    }
+
+    .mm-quick-stat {
+        padding: 15px;
+    }
+
+    .mm-quick-stat-value {
+        font-size: 22px;
+    }
+
+    .mm-quick-stat-label {
+        font-size: 11px;
+    }
+
+    /* Filters mobile */
+    .mm-filters-form {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .mm-filter-group {
+        width: 100%;
+    }
+
+    .mm-filter-group label {
+        font-size: 13px;
+    }
+
+    .mm-filter-group input,
+    .mm-filter-group select {
+        font-size: 16px; /* Previene zoom iOS */
+        padding: 12px;
+        min-height: 44px;
+    }
+
+    /* Card preventivi mobile */
+    .mm-preventivo-card {
+        padding: 15px;
+    }
+
+    .mm-preventivo-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .mm-preventivo-numero {
+        font-size: 16px;
+    }
+
+    .mm-preventivo-badge {
+        font-size: 11px;
+        padding: 4px 10px;
+    }
+
+    .mm-preventivo-info {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .mm-preventivo-card-footer {
+        flex-direction: column;
+        gap: 8px;
+        padding-top: 12px;
+    }
+
+    .mm-card-btn {
+        width: 100%;
+        padding: 12px 16px;
+        font-size: 14px;
+        min-height: 44px;
+    }
+
+    /* Totali mobile */
+    .mm-preventivo-totali {
+        font-size: 13px;
+    }
+
+    .mm-preventivo-acconto {
+        font-size: 12px;
+    }
+
+    /* Dashboard mobile - Nascondi tabella, mostra card */
+    .mm-preventivi-table-wrapper table {
+        display: none;
+    }
+
+    /* Crea layout card per dashboard mobile */
+    .mm-dashboard-mobile-cards {
+        display: block;
+    }
+
+    /* Form preventivo mobile */
+    .mm-form-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+
+    .mm-form-row {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .mm-form-group {
+        width: 100%;
+    }
+
+    .mm-form-group label {
+        font-size: 14px;
+        display: block;
+        margin-bottom: 8px;
+    }
+
+    .mm-form-group input,
+    .mm-form-group select,
+    .mm-form-group textarea {
+        font-size: 16px;
+        padding: 12px;
+        min-height: 44px;
+        width: 100%;
+    }
+
+    /* Checkbox e radio più grandi e touch-friendly */
+    .mm-checkbox-group,
+    .mm-radio-group {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .mm-checkbox-item,
+    .mm-radio-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        min-height: 44px;
+        cursor: pointer;
+    }
+
+    .mm-checkbox-item input[type="checkbox"],
+    .mm-checkbox-item input[type="radio"],
+    .mm-radio-item input[type="checkbox"],
+    .mm-radio-item input[type="radio"] {
+        width: 24px;
+        height: 24px;
+        min-height: 24px;
+        cursor: pointer;
+    }
+
+    .mm-checkbox-item label,
+    .mm-radio-item label {
+        font-size: 15px;
+        cursor: pointer;
+        margin: 0;
+    }
+
+    /* Servizi grid mobile */
+    .mm-servizi-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .mm-servizio-item {
+        padding: 12px;
+    }
+
+    .mm-servizio-item label {
+        font-size: 14px;
+    }
+
+    /* Services list mobile - form preventivo */
+    .mm-services-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .mm-services-header {
+        display: none; /* Nascondi header su mobile */
+    }
+
+    .mm-service-item {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border: 2px solid #e0e0e0;
+    }
+
+    .mm-service-item input[type="checkbox"] {
+        width: 24px;
+        height: 24px;
+        min-height: 24px;
+        align-self: flex-start;
+    }
+
+    .mm-service-item label {
+        font-size: 15px;
+        font-weight: 600;
+        flex: 1;
+        cursor: pointer;
+        line-height: 1.4;
+    }
+
+    .mm-service-pricing {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+    }
+
+    .mm-service-pricing input,
+    .mm-price-input,
+    .mm-discount-input,
+    .service-discount {
+        width: 100%;
+        font-size: 16px;
+        padding: 12px;
+        min-height: 44px;
+        border: 2px solid #e0e0e0;
+        border-radius: 6px;
+    }
+
+    .mm-service-pricing .service-price {
+        font-size: 16px;
+        font-weight: 700;
+        color: #e91e63;
+        padding: 8px 0;
+    }
+
+    /* Price summary mobile */
+    .mm-price-summary {
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 12px;
+    }
+
+    .mm-price-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 0;
+        font-size: 15px;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .mm-price-row.total,
+    .mm-price-row.mm-total {
+        font-size: 18px;
+        font-weight: 700;
+        color: #e91e63;
+        border-top: 2px solid #e91e63;
+        border-bottom: none;
+        padding-top: 15px;
+        margin-top: 10px;
+    }
+
+    .mm-price-row .label {
+        font-weight: 600;
+    }
+
+    .mm-price-row .value {
+        font-weight: 700;
+        color: #e91e63;
+    }
+
+    /* Pulsanti azione mobile */
+    .mm-form-actions {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .mm-btn-primary,
+    .mm-btn-secondary {
+        width: 100%;
+        padding: 14px 20px;
+        font-size: 16px;
+        min-height: 48px;
+    }
+
+    /* Modal/Dialog mobile */
+    .mm-modal-content {
+        width: 95%;
+        max-width: 95%;
+        margin: 10px;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .mm-modal-header {
+        padding: 15px;
+    }
+
+    .mm-modal-body {
+        padding: 15px;
+    }
+
+    .mm-modal-footer {
+        padding: 15px;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    /* Dettagli preventivo mobile */
+    .mm-preventivo-details {
+        padding: 15px;
+    }
+
+    .mm-price-row {
+        font-size: 14px;
+        padding: 8px 0;
+    }
+
+    /* Acconti mobile */
+    .mm-acconti-section,
+    .acconti-section {
+        margin-top: 20px;
+    }
+
+    .mm-acconti-list,
+    .acconti-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .acconto-item,
+    .mm-acconto-item {
+        flex-direction: column;
+        gap: 10px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border: 2px solid #e0e0e0;
+    }
+
+    .acconto-item > div,
+    .mm-acconto-item > div {
+        width: 100%;
+    }
+
+    .acconto-item input,
+    .mm-acconto-item input {
+        font-size: 16px;
+        padding: 12px;
+        min-height: 44px;
+        width: 100%;
+        border: 2px solid #e0e0e0;
+        border-radius: 6px;
+    }
+
+    .acconto-item label,
+    .mm-acconto-item label {
+        display: block;
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 6px;
+    }
+
+    .rimuovi-acconto,
+    .aggiungi-acconto,
+    .mm-btn-remove-acconto,
+    .mm-btn-add-acconto {
+        width: 100%;
+        padding: 12px;
+        min-height: 44px;
+        font-size: 15px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .rimuovi-acconto,
+    .mm-btn-remove-acconto {
+        background: #ffebee;
+        color: #c62828;
+    }
+
+    .aggiungi-acconto,
+    .mm-btn-add-acconto {
+        background: #e8f5e9;
+        color: #2e7d32;
+        margin-top: 10px;
+    }
+
+    /* Loading spinner mobile */
+    .mm-loading {
+        width: 20px;
+        height: 20px;
+    }
+
+    /* Alert/Message mobile */
+    .mm-alert {
+        font-size: 14px;
+        padding: 12px;
+    }
+
+    /* Tabelle responsive con scroll orizzontale */
+    .mm-table-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 -15px;
+        padding: 0 15px;
+    }
+
+    table {
+        min-width: 600px;
+    }
+
+    /* Notes/Textarea mobile */
+    textarea {
+        min-height: 120px;
+        resize: vertical;
+    }
+
+    /* Date picker mobile friendly */
+    input[type="date"],
+    input[type="time"],
+    input[type="datetime-local"] {
+        font-size: 16px;
+        padding: 12px;
+        min-height: 44px;
+    }
+
+    /* Select dropdown mobile */
+    select {
+        background-image: url('data:image/svg+xml;utf8,<svg fill="%23333" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>');
+        background-repeat: no-repeat;
+        background-position: right 8px center;
+        background-size: 20px;
+        padding-right: 36px;
+    }
+
+    /* Sticky footer per azioni form */
+    .mm-form-actions {
+        position: sticky;
+        bottom: 0;
+        background: white;
+        padding: 15px;
+        margin: 0 -15px;
+        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+        z-index: 10;
+    }
+
+    /* Success/Error messages mobile */
+    .mm-success-message,
+    .mm-error-message {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        z-index: 9999;
+        padding: 15px;
+        border-radius: 8px;
+        font-size: 14px;
+        text-align: center;
+        animation: slideDown 0.3s ease-out;
+    }
+
+    @keyframes slideDown {
+        from {
+            transform: translateY(-100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    /* Nasconde elementi non necessari su mobile */
+    .mm-hide-mobile {
+        display: none !important;
+    }
+
+    /* Mostra elementi solo su mobile */
+    .mm-show-mobile {
+        display: block !important;
+    }
+}
+
+/* Media query per schermi molto piccoli (iPhone SE, ecc.) */
+@media only screen and (max-width: 375px) {
+    .mm-page-header h1 {
+        font-size: 20px;
+    }
+
+    .mm-quick-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .mm-quick-stat-value {
+        font-size: 20px;
+    }
+
+    .mm-preventivo-numero {
+        font-size: 14px;
+    }
+
+    .mm-card-btn {
+        font-size: 13px;
+        padding: 10px 12px;
+    }
+}
+
+/* Media query per tablet (768px - 1024px) */
+@media only screen and (min-width: 768px) and (max-width: 1024px) {
+    .mm-preventivi-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .mm-quick-stats {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    .mm-filters-form {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .mm-filter-group {
+        flex: 1;
+        min-width: 200px;
+    }
+
+    .mm-nav-center {
+        flex-direction: row;
+    }
+
+    .mm-nav-btn {
+        width: auto;
+    }
+}
+
+/* Landscape mode mobile */
+@media only screen and (max-width: 768px) and (orientation: landscape) {
+    .mm-preventivi-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .mm-quick-stats {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    .mm-modal-content {
+        max-height: 85vh;
+    }
+}
+
+/* Touch enhancements */
+@media (hover: none) and (pointer: coarse) {
+    /* Aumenta area touch per tutti i pulsanti */
+    button,
+    a.mm-card-btn,
+    .mm-nav-btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    /* Rimuovi hover effects su touch devices */
+    .mm-card-btn:hover,
+    .mm-nav-btn:hover,
+    button:hover {
+        transform: none;
+    }
+
+    /* Feedback visivo al tap */
+    .mm-card-btn:active,
+    .mm-nav-btn:active,
+    button:active {
+        opacity: 0.7;
+        transform: scale(0.98);
+    }
+
+    /* Input più grandi su touch */
+    input,
+    select,
+    textarea {
+        font-size: 16px !important; /* Previene zoom iOS */
+    }
+}
+
+/* Dark mode support (opzionale) */
+@media (prefers-color-scheme: dark) {
+    /* Implementazione dark mode se richiesta */
+}
+
+/* Riduce animazioni per chi ha attivato "reduce motion" */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
     }
 }

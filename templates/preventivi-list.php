@@ -26,6 +26,9 @@ if (isset($_GET['categoria_id']) && !empty($_GET['categoria_id'])) {
 if (isset($_GET['search']) && !empty($_GET['search'])) {
     $filters['search'] = sanitize_text_field($_GET['search']);
 }
+if (isset($_GET['order_by']) && !empty($_GET['order_by'])) {
+    $filters['order_by'] = sanitize_text_field($_GET['order_by']);
+}
 
 $preventivi = MM_Database::get_all_preventivi($filters);
 $stats = MM_Database::get_statistics();
@@ -125,6 +128,20 @@ $categorie = MM_Database::get_tipi_evento(true); // Usa tipi evento invece di ca
                 </select>
             </div>
 
+            <div class="mm-filter-group">
+                <label for="order_by">🔃 Ordina per</label>
+                <select id="order_by" name="order_by">
+                    <option value="data_evento_desc" <?php selected(isset($_GET['order_by']) && $_GET['order_by'] === 'data_evento_desc'); ?>>Data Evento (recente)</option>
+                    <option value="data_evento_asc" <?php selected(isset($_GET['order_by']) && $_GET['order_by'] === 'data_evento_asc'); ?>>Data Evento (vecchio)</option>
+                    <option value="data_preventivo_desc" <?php selected(isset($_GET['order_by']) && $_GET['order_by'] === 'data_preventivo_desc'); ?>>Data Preventivo (recente)</option>
+                    <option value="data_preventivo_asc" <?php selected(isset($_GET['order_by']) && $_GET['order_by'] === 'data_preventivo_asc'); ?>>Data Preventivo (vecchio)</option>
+                    <option value="numero_preventivo_desc" <?php selected(isset($_GET['order_by']) && $_GET['order_by'] === 'numero_preventivo_desc'); ?>>Numero Preventivo (Z-A)</option>
+                    <option value="numero_preventivo_asc" <?php selected(isset($_GET['order_by']) && $_GET['order_by'] === 'numero_preventivo_asc'); ?>>Numero Preventivo (A-Z)</option>
+                    <option value="totale_desc" <?php selected(isset($_GET['order_by']) && $_GET['order_by'] === 'totale_desc'); ?>>Importo (alto)</option>
+                    <option value="totale_asc" <?php selected(isset($_GET['order_by']) && $_GET['order_by'] === 'totale_asc'); ?>>Importo (basso)</option>
+                </select>
+            </div>
+
             <div class="mm-filter-actions">
                 <button type="submit" class="mm-filter-btn mm-filter-btn-primary">Filtra</button>
                 <a href="<?php echo get_permalink(); ?>" class="mm-filter-btn mm-filter-btn-secondary">Reset</a>
@@ -159,10 +176,45 @@ $categorie = MM_Database::get_tipi_evento(true); // Usa tipi evento invece di ca
                             <span>📅 <?php echo date('d/m/Y', strtotime($preventivo['data_evento'])); ?></span>
                             <span>📍 <?php echo esc_html($preventivo['location']); ?></span>
                         </div>
-                        <div class="mm-preventivo-total">
-                            <span class="mm-preventivo-total-label">Totale:</span>
-                            <span class="mm-preventivo-total-value">€ <?php echo number_format($preventivo['totale'], 2, ',', '.'); ?></span>
+                        <?php
+                        // Calcola imponibile corretto (subtotale = totale servizi - sconti)
+                        $totale_servizi = floatval($preventivo['totale_servizi']);
+                        $sconto_fisso = floatval($preventivo['sconto']);
+                        $sconto_percentuale = floatval($preventivo['sconto_percentuale']);
+                        $sconto_perc_importo = $totale_servizi * ($sconto_percentuale / 100);
+                        $imponibile = $totale_servizi - $sconto_fisso - $sconto_perc_importo;
+
+                        $totale_acconti = isset($preventivo['totale_acconti']) ? floatval($preventivo['totale_acconti']) : 0;
+                        $restante = $preventivo['totale'] - $totale_acconti;
+                        ?>
+
+                        <div class="mm-preventivo-totali" style="margin-top: 10px; padding: 8px 12px; background: #f5f5f5; border-radius: 6px; font-size: 12px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <span style="color: #666; font-weight: 500;">Subtotale:</span>
+                                <span style="color: #666; font-weight: 600;">€ <?php echo number_format($imponibile, 2, ',', '.'); ?></span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; padding-top: 4px; border-top: 1px solid #ddd;">
+                                <span style="color: #333; font-weight: 600;">Totale:</span>
+                                <span style="color: #e91e63; font-weight: bold; font-size: 14px;">€ <?php echo number_format($preventivo['totale'], 2, ',', '.'); ?></span>
+                            </div>
                         </div>
+
+                        <?php
+                        // Debug temporaneo
+                        error_log('Card Preventivo #' . $preventivo['numero_preventivo'] . ' - totale_acconti: ' . $totale_acconti);
+                        ?>
+                        <?php if ($totale_acconti > 0) : ?>
+                        <div class="mm-preventivo-acconto" style="margin-top: 10px; padding: 8px 12px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-left: 3px solid #4caf50; border-radius: 6px; font-size: 12px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <span style="color: #2e7d32; font-weight: 600;">💰 Acconti:</span>
+                                <span style="color: #2e7d32; font-weight: bold;">€ <?php echo number_format($totale_acconti, 2, ',', '.'); ?></span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: #555; font-weight: 500;">Restante:</span>
+                                <span style="color: #555; font-weight: 600;">€ <?php echo number_format($restante, 2, ',', '.'); ?></span>
+                            </div>
+                        </div>
+                        <?php endif; ?>
                     </div>
 
                     <div class="mm-preventivo-card-footer">
@@ -175,6 +227,16 @@ $categorie = MM_Database::get_tipi_evento(true); // Usa tipi evento invece di ca
                            target="_blank">
                             📄 PDF
                         </a>
+                        <button class="mm-card-btn mm-card-btn-email mm-send-email-btn"
+                                data-preventivo-id="<?php echo $preventivo['id']; ?>"
+                                data-email="<?php echo esc_attr($preventivo['email']); ?>">
+                            📧 Email
+                        </button>
+                        <button class="mm-card-btn mm-card-btn-whatsapp mm-send-whatsapp-btn"
+                                data-preventivo-id="<?php echo $preventivo['id']; ?>"
+                                data-telefono="<?php echo esc_attr($preventivo['telefono']); ?>">
+                            💬 WhatsApp
+                        </button>
                         <a href="<?php echo add_query_arg('id', $preventivo['id'], home_url('/modifica-preventivo/')); ?>"
                            class="mm-card-btn mm-card-btn-edit">
                             ✏️ Modifica
@@ -846,6 +908,99 @@ jQuery(document).ready(function($) {
                 console.error('AJAX Error:', {xhr: xhr, status: status, error: error});
                 alert('Errore di connessione: ' + error + '. Riprova.');
                 $btn.prop('disabled', false).html(originalText);
+            }
+        });
+    });
+
+    // Gestione pulsante Invia Email
+    $('.mm-send-email-btn').on('click', function(e) {
+        e.preventDefault();
+
+        const $btn = $(this);
+        const preventivoId = $btn.data('preventivo-id');
+        const email = $btn.data('email');
+
+        if (!email) {
+            alert('❌ Questo preventivo non ha un indirizzo email associato.');
+            return;
+        }
+
+        if (!confirm('📧 Vuoi inviare il preventivo via email a ' + email + '?')) {
+            return;
+        }
+
+        const originalHtml = $btn.html();
+        $btn.prop('disabled', true).html('⏳ Invio...');
+
+        $.ajax({
+            url: mmPreventivi.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'mm_send_preventivo_email',
+                nonce: mmPreventivi.nonce,
+                preventivo_id: preventivoId
+            },
+            success: function(response) {
+                console.log('Risposta invio email:', response);
+
+                if (response.success) {
+                    alert('✅ ' + (response.data.message || 'Email inviata con successo!'));
+                    $btn.prop('disabled', false).html(originalHtml);
+                } else {
+                    console.error('Errore invio email:', response);
+                    alert('❌ Errore: ' + (response.data && response.data.message ? response.data.message : 'Impossibile inviare l\'email'));
+                    $btn.prop('disabled', false).html(originalHtml);
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', {xhr: xhr, status: status, error: error});
+                alert('❌ Errore di connessione: ' + error + '. Riprova.');
+                $btn.prop('disabled', false).html(originalHtml);
+            }
+        });
+    });
+
+    // Gestione pulsante WhatsApp
+    $('.mm-send-whatsapp-btn').on('click', function(e) {
+        e.preventDefault();
+
+        const $btn = $(this);
+        const preventivoId = $btn.data('preventivo-id');
+        const telefono = $btn.data('telefono');
+
+        if (!telefono) {
+            alert('❌ Questo preventivo non ha un numero di telefono associato.');
+            return;
+        }
+
+        const originalHtml = $btn.html();
+        $btn.prop('disabled', true).html('⏳ Generazione...');
+
+        $.ajax({
+            url: mmPreventivi.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'mm_get_whatsapp_link',
+                nonce: mmPreventivi.nonce,
+                preventivo_id: preventivoId
+            },
+            success: function(response) {
+                console.log('Risposta WhatsApp link:', response);
+
+                if (response.success && response.data.link) {
+                    // Apri WhatsApp in una nuova finestra
+                    window.open(response.data.link, '_blank');
+                    $btn.prop('disabled', false).html(originalHtml);
+                } else {
+                    console.error('Errore generazione link WhatsApp:', response);
+                    alert('❌ Errore: ' + (response.data && response.data.message ? response.data.message : 'Impossibile generare il link WhatsApp'));
+                    $btn.prop('disabled', false).html(originalHtml);
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', {xhr: xhr, status: status, error: error});
+                alert('❌ Errore di connessione: ' + error + '. Riprova.');
+                $btn.prop('disabled', false).html(originalHtml);
             }
         });
     });

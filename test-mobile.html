@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>Test Mobile - MM Preventivi</title>
+    <link rel="stylesheet" href="assets/css/frontend.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+        }
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section h2 {
+            color: #e91e63;
+            margin-top: 0;
+            font-size: 20px;
+            border-bottom: 2px solid #e91e63;
+            padding-bottom: 10px;
+        }
+        .device-info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .device-info p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1 style="text-align: center; color: #e91e63;">Test Ottimizzazione Mobile - MM Preventivi</h1>
+
+        <div class="device-info">
+            <p><strong>Dimensione schermo:</strong> <span id="screen-size"></span></p>
+            <p><strong>Viewport:</strong> <span id="viewport-size"></span></p>
+            <p><strong>Device Pixel Ratio:</strong> <span id="dpr"></span></p>
+            <p><strong>Touch Device:</strong> <span id="touch-device"></span></p>
+        </div>
+
+        <!-- Test Navigation -->
+        <div class="test-section">
+            <h2>Navigation Bar</h2>
+            <nav class="mm-nav-bar">
+                <div class="mm-nav-left">
+                    <span class="mm-nav-logo">MM Preventivi</span>
+                </div>
+                <div class="mm-nav-center">
+                    <button class="mm-nav-btn">Dashboard</button>
+                    <button class="mm-nav-btn">Nuovo</button>
+                    <button class="mm-nav-btn">Lista</button>
+                </div>
+                <div class="mm-nav-right">
+                    <button class="mm-nav-btn">Logout</button>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Test Buttons -->
+        <div class="test-section">
+            <h2>Touch-Friendly Buttons</h2>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="mm-card-btn mm-card-btn-primary">Pulsante Primario (44px min)</button>
+                <button class="mm-card-btn mm-card-btn-secondary">Pulsante Secondario</button>
+                <button class="mm-card-btn mm-card-btn-whatsapp">💬 WhatsApp</button>
+                <button class="mm-card-btn mm-card-btn-email">✉️ Email</button>
+            </div>
+        </div>
+
+        <!-- Test Form -->
+        <div class="test-section">
+            <h2>Form Elements</h2>
+            <div class="mm-form-grid">
+                <div class="mm-form-group">
+                    <label>Nome e Cognome</label>
+                    <input type="text" placeholder="Inserisci nome e cognome">
+                </div>
+                <div class="mm-form-group">
+                    <label>Email</label>
+                    <input type="email" placeholder="email@esempio.it">
+                </div>
+                <div class="mm-form-group">
+                    <label>Telefono</label>
+                    <input type="tel" placeholder="+39 123 456 7890">
+                </div>
+                <div class="mm-form-group">
+                    <label>Data Evento</label>
+                    <input type="date">
+                </div>
+                <div class="mm-form-group">
+                    <label>Categoria</label>
+                    <select>
+                        <option>Seleziona categoria</option>
+                        <option>Matrimonio</option>
+                        <option>Compleanno</option>
+                        <option>Aziendale</option>
+                    </select>
+                </div>
+                <div class="mm-form-group">
+                    <label>Note</label>
+                    <textarea placeholder="Inserisci note..."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Checkbox/Radio -->
+        <div class="test-section">
+            <h2>Checkbox & Radio (Touch-Friendly)</h2>
+            <div class="mm-checkbox-group">
+                <div class="mm-checkbox-item">
+                    <input type="checkbox" id="cb1">
+                    <label for="cb1">DJ & Animazione</label>
+                </div>
+                <div class="mm-checkbox-item">
+                    <input type="checkbox" id="cb2">
+                    <label for="cb2">Scenografia LED</label>
+                </div>
+                <div class="mm-checkbox-item">
+                    <input type="checkbox" id="cb3">
+                    <label for="cb3">Photo Booth</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Card -->
+        <div class="test-section">
+            <h2>Preventivo Card</h2>
+            <div class="mm-preventivo-card">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+                    <div>
+                        <div style="font-weight: 700; font-size: 16px; color: #e91e63;">PRV-2024-001</div>
+                        <div style="font-size: 14px;">Mario Rossi & Laura Bianchi</div>
+                    </div>
+                    <span style="background: #e8f5e9; color: #2e7d32; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;">Attivo</span>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <div style="font-size: 13px; color: #666;">📅 15/06/2024</div>
+                    <div style="font-size: 13px; color: #666;">📍 Villa Reale, Milano</div>
+                </div>
+                <div style="background: #f8f9fa; padding: 12px; border-radius: 8px; margin-bottom: 15px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span style="font-size: 13px;">Imponibile:</span>
+                        <strong style="color: #e91e63;">€ 3.500,00</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="font-size: 15px; font-weight: 600;">Totale:</span>
+                        <strong style="font-size: 18px; color: #e91e63;">€ 4.270,00</strong>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                    <button class="mm-card-btn mm-card-btn-primary">👁 Vedi</button>
+                    <button class="mm-card-btn mm-card-btn-secondary">✉️ Email</button>
+                    <button class="mm-card-btn mm-card-btn-whatsapp">💬 WhatsApp</button>
+                    <button class="mm-card-btn mm-card-btn-edit">✏️ Modifica</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Price Summary -->
+        <div class="test-section">
+            <h2>Price Summary</h2>
+            <div class="mm-price-summary">
+                <div class="mm-price-row">
+                    <span class="label">Subtotale:</span>
+                    <span class="value">€ 3.000,00</span>
+                </div>
+                <div class="mm-price-row">
+                    <span class="label">ENPALS (2%):</span>
+                    <span class="value">€ 60,00</span>
+                </div>
+                <div class="mm-price-row">
+                    <span class="label">Imponibile:</span>
+                    <span class="value">€ 3.060,00</span>
+                </div>
+                <div class="mm-price-row">
+                    <span class="label">IVA (22%):</span>
+                    <span class="value">€ 673,20</span>
+                </div>
+                <div class="mm-price-row total">
+                    <span class="label">TOTALE:</span>
+                    <span class="value">€ 3.733,20</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Acconti -->
+        <div class="test-section">
+            <h2>Acconti Section</h2>
+            <div class="mm-acconti-section">
+                <div class="mm-acconti-list">
+                    <div class="acconto-item">
+                        <div>
+                            <label>Importo Acconto 1</label>
+                            <input type="number" value="500" step="0.01">
+                        </div>
+                        <div>
+                            <label>Data Scadenza</label>
+                            <input type="date">
+                        </div>
+                        <button class="rimuovi-acconto">🗑 Rimuovi</button>
+                    </div>
+                    <div class="acconto-item">
+                        <div>
+                            <label>Importo Acconto 2</label>
+                            <input type="number" value="1000" step="0.01">
+                        </div>
+                        <div>
+                            <label>Data Scadenza</label>
+                            <input type="date">
+                        </div>
+                        <button class="rimuovi-acconto">🗑 Rimuovi</button>
+                    </div>
+                </div>
+                <button class="aggiungi-acconto">➕ Aggiungi Acconto</button>
+            </div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="test-section">
+            <h2>📱 Istruzioni Test</h2>
+            <ol>
+                <li>Apri questa pagina su diversi dispositivi (smartphone, tablet)</li>
+                <li>Prova a ridimensionare la finestra del browser</li>
+                <li>Verifica che tutti i pulsanti siano facilmente cliccabili (minimo 44x44px)</li>
+                <li>Controlla che gli input di testo non causino zoom su iOS (font-size 16px)</li>
+                <li>Verifica la navigazione sia usabile in verticale</li>
+                <li>Testa in modalità landscape</li>
+                <li>Verifica che i form siano compilabili facilmente</li>
+            </ol>
+            <h3>Breakpoints:</h3>
+            <ul>
+                <li><strong>&lt; 375px:</strong> Smartphone molto piccoli (iPhone SE)</li>
+                <li><strong>&lt; 768px:</strong> Smartphone</li>
+                <li><strong>768px - 1024px:</strong> Tablet</li>
+                <li><strong>&gt; 1024px:</strong> Desktop</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Display device info
+        function updateDeviceInfo() {
+            document.getElementById('screen-size').textContent =
+                `${screen.width} x ${screen.height}px`;
+            document.getElementById('viewport-size').textContent =
+                `${window.innerWidth} x ${window.innerHeight}px`;
+            document.getElementById('dpr').textContent = window.devicePixelRatio;
+            document.getElementById('touch-device').textContent =
+                ('ontouchstart' in window) ? 'Sì' : 'No';
+        }
+
+        updateDeviceInfo();
+        window.addEventListener('resize', updateDeviceInfo);
+    </script>
+</body>
+</html>

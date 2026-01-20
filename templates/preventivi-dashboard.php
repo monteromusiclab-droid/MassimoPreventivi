@@ -27,6 +27,9 @@ if (isset($_GET['categoria_id']) && !empty($_GET['categoria_id'])) {
 if (isset($_GET['search']) && !empty($_GET['search'])) {
     $filters['search'] = sanitize_text_field($_GET['search']);
 }
+if (isset($_GET['order_by']) && !empty($_GET['order_by'])) {
+    $filters['order_by'] = sanitize_text_field($_GET['order_by']);
+}
 
 $preventivi = MM_Database::get_all_preventivi($filters);
 $categorie = MM_Database::get_tipi_evento(true);
@@ -369,8 +372,22 @@ $categorie = MM_Database::get_tipi_evento(true);
             </select>
         </div>
 
+        <div class="mm-filter-group">
+            <label>Ordina per</label>
+            <select name="order_by">
+                <option value="data_evento_desc" <?php selected($_GET['order_by'] ?? '', 'data_evento_desc'); ?>>Data Evento ↓</option>
+                <option value="data_evento_asc" <?php selected($_GET['order_by'] ?? '', 'data_evento_asc'); ?>>Data Evento ↑</option>
+                <option value="data_preventivo_desc" <?php selected($_GET['order_by'] ?? '', 'data_preventivo_desc'); ?>>Data Preventivo ↓</option>
+                <option value="data_preventivo_asc" <?php selected($_GET['order_by'] ?? '', 'data_preventivo_asc'); ?>>Data Preventivo ↑</option>
+                <option value="numero_preventivo_desc" <?php selected($_GET['order_by'] ?? '', 'numero_preventivo_desc'); ?>>Numero ↓</option>
+                <option value="numero_preventivo_asc" <?php selected($_GET['order_by'] ?? '', 'numero_preventivo_asc'); ?>>Numero ↑</option>
+                <option value="totale_desc" <?php selected($_GET['order_by'] ?? '', 'totale_desc'); ?>>Importo ↓</option>
+                <option value="totale_asc" <?php selected($_GET['order_by'] ?? '', 'totale_asc'); ?>>Importo ↑</option>
+            </select>
+        </div>
+
         <button type="submit" class="mm-filter-btn">🔍 Filtra</button>
-        <?php if (!empty($_GET['search']) || !empty($_GET['stato']) || !empty($_GET['categoria_id'])) : ?>
+        <?php if (!empty($_GET['search']) || !empty($_GET['stato']) || !empty($_GET['categoria_id']) || !empty($_GET['order_by'])) : ?>
             <a href="?" class="mm-filter-btn" style="background: #757575; text-decoration: none;">✕ Pulisci</a>
         <?php endif; ?>
     </form>
@@ -394,7 +411,9 @@ $categorie = MM_Database::get_tipi_evento(true);
                         <th>Data Evento</th>
                         <th>Momento</th>
                         <th>Location</th>
+                        <th>Imponibile</th>
                         <th>Totale</th>
+                        <th>Acconti</th>
                         <th>Stato</th>
                         <th>Azioni</th>
                     </tr>
@@ -423,7 +442,24 @@ $categorie = MM_Database::get_tipi_evento(true);
                                 <?php endif; ?>
                             </td>
                             <td><?php echo esc_html($preventivo['location']); ?></td>
+                            <?php
+                            // Calcola subtotale (totale servizi - sconti)
+                            $totale_servizi = floatval($preventivo['totale_servizi']);
+                            $sconto_fisso = floatval($preventivo['sconto']);
+                            $sconto_percentuale = floatval($preventivo['sconto_percentuale']);
+                            $sconto_perc_importo = $totale_servizi * ($sconto_percentuale / 100);
+                            $imponibile = $totale_servizi - $sconto_fisso - $sconto_perc_importo;
+                            $totale_acconti = isset($preventivo['totale_acconti']) ? floatval($preventivo['totale_acconti']) : 0;
+                            ?>
+                            <td><span class="mm-imponibile-badge" style="background: #f5f5f5; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: #666;"><?php echo number_format($imponibile, 2, ',', '.'); ?> €</span></td>
                             <td><span class="mm-totale-badge"><?php echo number_format($preventivo['totale'], 2, ',', '.'); ?> €</span></td>
+                            <td>
+                                <?php if ($totale_acconti > 0) : ?>
+                                    <span class="mm-acconto-badge" style="background: #e8f5e9; padding: 4px 8px; border-radius: 4px; font-weight: 600; color: #2e7d32;">💰 <?php echo number_format($totale_acconti, 2, ',', '.'); ?> €</span>
+                                <?php else : ?>
+                                    <span style="color: #999;">—</span>
+                                <?php endif; ?>
+                            </td>
                             <td>
                                 <span class="mm-stato-badge mm-stato-<?php echo esc_attr($preventivo['stato']); ?>">
                                     <?php echo esc_html(ucfirst($preventivo['stato'])); ?>
@@ -437,16 +473,165 @@ $categorie = MM_Database::get_tipi_evento(true);
                                         data-preventivo-id="<?php echo $preventivo['id']; ?>"
                                         data-cliente="<?php echo esc_attr($preventivo['sposi']); ?>"
                                         data-email="<?php echo esc_attr($preventivo['email']); ?>">
-                                    📧 Invia PDF
+                                    📧 Email
+                                </button>
+                                <button class="mm-action-btn mm-btn-whatsapp mm-send-whatsapp-btn"
+                                        data-preventivo-id="<?php echo $preventivo['id']; ?>"
+                                        data-telefono="<?php echo esc_attr($preventivo['telefono']); ?>">
+                                    💬 WhatsApp
                                 </button>
                             </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+
+            <!-- Mobile Cards (visibili solo su mobile) -->
+            <div class="mm-dashboard-mobile-cards" style="display: none;">
+                <?php foreach ($preventivi as $preventivo) :
+                    // Calcola imponibile
+                    $totale_servizi = floatval($preventivo['totale_servizi']);
+                    $sconto_fisso = floatval($preventivo['sconto']);
+                    $sconto_percentuale = floatval($preventivo['sconto_percentuale']);
+                    $sconto_perc_importo = $totale_servizi * ($sconto_percentuale / 100);
+                    $imponibile = $totale_servizi - $sconto_fisso - $sconto_perc_importo;
+                    $totale_acconti = isset($preventivo['totale_acconti']) ? floatval($preventivo['totale_acconti']) : 0;
+
+                    $stato_class = '';
+                    switch($preventivo['stato']) {
+                        case 'attivo': $stato_class = 'stato-attivo'; break;
+                        case 'accettato': $stato_class = 'stato-accettato'; break;
+                        case 'confermato': $stato_class = 'stato-confermato'; break;
+                        case 'scaduto': $stato_class = 'stato-scaduto'; break;
+                        case 'annullato': $stato_class = 'stato-annullato'; break;
+                    }
+                ?>
+                <div class="mm-preventivo-card" style="margin-bottom: 15px; background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <!-- Header -->
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #e0e0e0;">
+                        <div>
+                            <div style="font-weight: 700; font-size: 16px; color: #e91e63;">
+                                <?php echo esc_html($preventivo['numero_preventivo']); ?>
+                            </div>
+                            <div style="font-size: 14px; color: #333; margin-top: 4px;">
+                                <?php echo esc_html($preventivo['sposi']); ?>
+                            </div>
+                        </div>
+                        <span class="<?php echo $stato_class; ?>" style="padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; text-transform: uppercase;">
+                            <?php echo esc_html(ucfirst($preventivo['stato'])); ?>
+                        </span>
+                    </div>
+
+                    <!-- Info -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; font-size: 13px;">
+                        <?php if (!empty($preventivo['categoria_nome'])) : ?>
+                        <div>
+                            <div style="color: #666; font-size: 11px; text-transform: uppercase; margin-bottom: 2px;">Categoria</div>
+                            <div style="color: #333;"><?php echo esc_html($preventivo['categoria_icona'] . ' ' . $preventivo['categoria_nome']); ?></div>
+                        </div>
+                        <?php endif; ?>
+
+                        <div>
+                            <div style="color: #666; font-size: 11px; text-transform: uppercase; margin-bottom: 2px;">Data Evento</div>
+                            <div style="color: #333;"><?php echo esc_html(date('d/m/Y', strtotime($preventivo['data_evento']))); ?></div>
+                        </div>
+
+                        <?php if (!empty($preventivo['location'])) : ?>
+                        <div style="grid-column: 1 / -1;">
+                            <div style="color: #666; font-size: 11px; text-transform: uppercase; margin-bottom: 2px;">Location</div>
+                            <div style="color: #333;"><?php echo esc_html($preventivo['location']); ?></div>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Totali -->
+                    <div style="background: #f5f5f5; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px;">
+                            <span style="color: #666;">Imponibile:</span>
+                            <span style="color: #333; font-weight: 600;">€ <?php echo number_format($imponibile, 2, ',', '.'); ?></span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding-top: 6px; border-top: 1px solid #ddd; font-size: 14px;">
+                            <span style="color: #333; font-weight: 600;">Totale:</span>
+                            <span style="color: #e91e63; font-weight: 700;">€ <?php echo number_format($preventivo['totale'], 2, ',', '.'); ?></span>
+                        </div>
+                        <?php if ($totale_acconti > 0) : ?>
+                        <div style="display: flex; justify-content: space-between; margin-top: 6px; padding-top: 6px; border-top: 1px solid #ddd; font-size: 13px;">
+                            <span style="color: #2e7d32; font-weight: 600;">💰 Acconti:</span>
+                            <span style="color: #2e7d32; font-weight: 700;">€ <?php echo number_format($totale_acconti, 2, ',', '.'); ?></span>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Azioni -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <button class="mm-action-btn mm-btn-view"
+                                style="background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%); color: white; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 44px;"
+                                onclick="alert('Dettagli preventivo - da implementare')">
+                            👁 Vedi
+                        </button>
+                        <button class="mm-send-email-btn"
+                                style="background: linear-gradient(135deg, #2196f3 0%, #1565c0 100%); color: white; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 44px;"
+                                data-preventivo-id="<?php echo $preventivo['id']; ?>"
+                                data-cliente="<?php echo esc_attr($preventivo['sposi']); ?>"
+                                data-email="<?php echo esc_attr($preventivo['email']); ?>">
+                            📧 Email
+                        </button>
+                        <button class="mm-send-whatsapp-btn"
+                                style="background: linear-gradient(135deg, #25d366 0%, #128c7e 100%); color: white; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 44px;"
+                                data-preventivo-id="<?php echo $preventivo['id']; ?>"
+                                data-telefono="<?php echo esc_attr($preventivo['telefono']); ?>">
+                            💬 WhatsApp
+                        </button>
+                        <button class="mm-action-btn"
+                                style="background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 44px;"
+                                onclick="window.location.href='<?php echo add_query_arg('id', $preventivo['id'], home_url('/modifica-preventivo/')); ?>'">
+                            ✏️ Modifica
+                        </button>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
         <?php endif; ?>
     </div>
 </div>
+
+<style>
+/* Mostra card mobile solo su schermi piccoli */
+@media only screen and (max-width: 768px) {
+    .mm-preventivi-table {
+        display: none !important;
+    }
+
+    .mm-dashboard-mobile-cards {
+        display: block !important;
+    }
+
+    .stato-attivo {
+        background: #fff3e0;
+        color: #e65100;
+    }
+
+    .stato-accettato {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+
+    .stato-confermato {
+        background: #e3f2fd;
+        color: #1565c0;
+    }
+
+    .stato-scaduto {
+        background: #ffebee;
+        color: #c62828;
+    }
+
+    .stato-annullato {
+        background: #f5f5f5;
+        color: #616161;
+    }
+}
+</style>
 
 <script>
 jQuery(document).ready(function($) {
@@ -515,6 +700,53 @@ jQuery(document).ready(function($) {
                     errorMessage = xhr.responseText || error || 'Errore sconosciuto';
                 }
 
+                alert('❌ Errore: ' + errorMessage);
+            },
+            complete: function() {
+                $btn.prop('disabled', false).html(originalHtml);
+            }
+        });
+    });
+
+    // Gestione pulsante WhatsApp
+    $('.mm-send-whatsapp-btn').on('click', function(e) {
+        e.preventDefault();
+
+        const $btn = $(this);
+        const preventivoId = $btn.data('preventivo-id');
+        const telefono = $btn.data('telefono');
+
+        if (!telefono) {
+            alert('❌ Questo preventivo non ha un numero di telefono associato.');
+            return;
+        }
+
+        const originalHtml = $btn.html();
+        $btn.prop('disabled', true).html('<span class="mm-loading"></span> Generazione...');
+
+        $.ajax({
+            url: '<?php echo admin_url('admin-ajax.php'); ?>',
+            type: 'POST',
+            data: {
+                action: 'mm_get_whatsapp_link',
+                nonce: '<?php echo wp_create_nonce('mm_send_email'); ?>',
+                preventivo_id: preventivoId
+            },
+            dataType: 'json',
+            success: function(response) {
+                console.log('Risposta WhatsApp:', response);
+                if (response && response.success && response.data.link) {
+                    // Apri WhatsApp in una nuova finestra
+                    window.open(response.data.link, '_blank');
+                    alert('✅ Link WhatsApp aperto!');
+                } else {
+                    const errorMsg = (response && response.data && response.data.message) ? response.data.message : 'Impossibile generare il link WhatsApp';
+                    alert('❌ Errore: ' + errorMsg);
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', {xhr: xhr, status: status, error: error});
+                const errorMessage = xhr.responseText || error || 'Errore di connessione';
                 alert('❌ Errore: ' + errorMessage);
             },
             complete: function() {

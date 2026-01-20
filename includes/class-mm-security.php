@@ -233,14 +233,30 @@ class MM_Security {
         if (isset($data['servizi']) && is_array($data['servizi'])) {
             $sanitized['servizi'] = array();
             foreach ($data['servizi'] as $servizio) {
+                // Supporta sia 'nome' che 'nome_servizio' per retrocompatibilità
+                $nome_servizio = isset($servizio['nome_servizio']) ? $servizio['nome_servizio'] : (isset($servizio['nome']) ? $servizio['nome'] : '');
                 $sanitized['servizi'][] = array(
-                    'nome' => sanitize_text_field($servizio['nome']),
+                    'nome_servizio' => sanitize_text_field($nome_servizio),
+                    'nome' => sanitize_text_field($nome_servizio), // Per retrocompatibilità
                     'prezzo' => floatval($servizio['prezzo']),
                     'sconto' => isset($servizio['sconto']) ? floatval($servizio['sconto']) : 0
                 );
             }
         }
-        
+
+        // Acconti multipli
+        if (isset($data['acconti']) && is_array($data['acconti'])) {
+            $sanitized['acconti'] = array();
+            foreach ($data['acconti'] as $acconto) {
+                if (!empty($acconto['data_acconto']) && !empty($acconto['importo_acconto'])) {
+                    $sanitized['acconti'][] = array(
+                        'data_acconto' => sanitize_text_field($acconto['data_acconto']),
+                        'importo_acconto' => floatval($acconto['importo_acconto'])
+                    );
+                }
+            }
+        }
+
         return $sanitized;
     }
     

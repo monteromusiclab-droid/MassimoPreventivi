@@ -96,7 +96,11 @@ $preventivo['applica_enpals'] = intval($preventivo['applica_enpals']);
 $preventivo['applica_iva'] = intval($preventivo['applica_iva']);
 
 // I servizi sono già un array dal database (tabella separata)
-$servizi_db = isset($preventivo['servizi']) && is_array($preventivo['servizi']) ? $preventivo['servizi'] : array();
+// Escludiamo i servizi che iniziano con "Rito" perché gestiti separatamente
+$servizi_db_completi = isset($preventivo['servizi']) && is_array($preventivo['servizi']) ? $preventivo['servizi'] : array();
+$servizi_db = array_filter($servizi_db_completi, function($serv) {
+    return strpos($serv['nome_servizio'], 'Rito') !== 0;
+});
 
 // Cerimonia e servizi_extra sono JSON encoded
 $cerimonia_db = isset($preventivo['cerimonia']) ? (is_string($preventivo['cerimonia']) ? json_decode($preventivo['cerimonia'], true) : $preventivo['cerimonia']) : array();
@@ -104,6 +108,17 @@ $servizi_extra_db = isset($preventivo['servizi_extra']) ? (is_string($preventivo
 
 // Carica catalogo servizi
 $catalogo_servizi = MM_Database::get_catalogo_servizi(array('attivo' => 1));
+
+// Debug: log servizi del database vs catalogo
+error_log('=== DEBUG EDIT PREVENTIVO #' . $preventivo_id . ' ===');
+error_log('Servizi nel database:');
+foreach ($servizi_db as $s) {
+    error_log('  - ' . $s['nome_servizio'] . ' (prezzo: ' . $s['prezzo'] . ', sconto: ' . $s['sconto'] . ')');
+}
+error_log('Servizi nel catalogo:');
+foreach ($catalogo_servizi as $c) {
+    error_log('  - ' . $c['nome_servizio']);
+}
 
 // Carica tipi evento attivi
 $categorie = MM_Database::get_tipi_evento(true);
@@ -231,6 +246,70 @@ $categorie = MM_Database::get_tipi_evento(true);
                 </div>
             </div>
 
+            <!-- Cerimonia (Rito) -->
+            <div class="mm-form-section">
+                <h2 class="mm-section-title">💒 Rito</h2>
+                <div class="mm-checkbox-group" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <div class="mm-checkbox-item">
+                        <input type="checkbox" id="violino" name="cerimonia[]" value="Violino"
+                               <?php checked(is_array($cerimonia_db) && in_array('Violino', $cerimonia_db)); ?>>
+                        <label for="violino">Violino</label>
+                    </div>
+                    <div class="mm-checkbox-item">
+                        <input type="checkbox" id="arpa" name="cerimonia[]" value="Arpa"
+                               <?php checked(is_array($cerimonia_db) && in_array('Arpa', $cerimonia_db)); ?>>
+                        <label for="arpa">Arpa</label>
+                    </div>
+                    <div class="mm-checkbox-item">
+                        <input type="checkbox" id="piano" name="cerimonia[]" value="Piano"
+                               <?php checked(is_array($cerimonia_db) && in_array('Piano', $cerimonia_db)); ?>>
+                        <label for="piano">Piano</label>
+                    </div>
+                    <div class="mm-checkbox-item">
+                        <input type="checkbox" id="altro_cerimonia" name="cerimonia[]" value="Altro"
+                               <?php checked(is_array($cerimonia_db) && in_array('Altro', $cerimonia_db)); ?>>
+                        <label for="altro_cerimonia">Altro</label>
+                    </div>
+                </div>
+                <?php
+                // Cerca il prezzo del rito nei servizi
+                $prezzo_rito = 0;
+                foreach ($servizi_db as $serv) {
+                    // Cerca servizi che iniziano con "Rito"
+                    if (strpos($serv['nome_servizio'], 'Rito') === 0) {
+                        $prezzo_rito = floatval($serv['prezzo']);
+                        break;
+                    }
+                }
+                ?>
+                <div class="mm-form-group" style="margin-top: 15px;">
+                    <label for="prezzo_cerimonia">Prezzo Rito (€)</label>
+                    <input type="number" id="prezzo_cerimonia" name="prezzo_cerimonia"
+                           value="<?php echo $prezzo_rito; ?>"
+                           placeholder="0.00" step="0.01" min="0"
+                           style="max-width: 200px;">
+                </div>
+            </div>
+
+            <!-- Servizi Extra -->
+            <div class="mm-form-section">
+                <h2 class="mm-section-title">✨ Servizi Extra</h2>
+                <div class="mm-checkbox-group" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <?php
+                    $extras_disponibili = array('Accoglienza', 'Antipasti', 'Aperitivo', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Open Bar', 'Torta', 'Confettata', 'Bomboniere');
+                    foreach ($extras_disponibili as $extra) :
+                        $is_checked = is_array($servizi_extra_db) && in_array($extra, $servizi_extra_db);
+                    ?>
+                    <div class="mm-checkbox-item">
+                        <input type="checkbox" id="extra_<?php echo sanitize_title($extra); ?>"
+                               name="servizi_extra[]" value="<?php echo esc_attr($extra); ?>"
+                               <?php checked($is_checked); ?>>
+                        <label for="extra_<?php echo sanitize_title($extra); ?>"><?php echo esc_html($extra); ?></label>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
             <!-- Servizi -->
             <div class="mm-form-section">
                 <h2 class="mm-section-title">🎵 Servizi Disponibili</h2>
@@ -250,26 +329,35 @@ $categorie = MM_Database::get_tipi_evento(true);
                         // Controlla se questo servizio è già selezionato
                         $is_selected = false;
                         $sconto_servizio = 0;
+                        $prezzo_custom = 0;
+
                         if (is_array($servizi_db)) {
                             foreach ($servizi_db as $serv_db) {
-                                if ($serv_db['nome_servizio'] == $servizio['nome_servizio']) {
+                                // Confronto flessibile: il servizio del DB inizia con il nome del catalogo
+                                // Es: "Strumento v Violino" inizia con "Strumento v"
+                                if (strpos($serv_db['nome_servizio'], $servizio['nome_servizio']) === 0) {
                                     $is_selected = true;
                                     $sconto_servizio = isset($serv_db['sconto']) ? floatval($serv_db['sconto']) : 0;
+                                    $prezzo_custom = floatval($serv_db['prezzo']);
                                     break;
                                 }
                             }
                         }
                     ?>
                     <div class="mm-service-item">
+                        <?php
+                        // Usa il prezzo salvato se presente, altrimenti usa il prezzo di default
+                        $prezzo_visualizzato = ($is_selected && $prezzo_custom > 0) ? $prezzo_custom : floatval($servizio['prezzo_default'] ?? 0);
+                        ?>
                         <input type="checkbox"
                                class="service-checkbox"
                                data-service-id="<?php echo $servizio['id']; ?>"
                                data-service-name="<?php echo esc_attr($servizio['nome_servizio']); ?>"
-                               data-service-price="<?php echo floatval($servizio['prezzo_default'] ?? 0); ?>"
+                               data-service-price="<?php echo $prezzo_visualizzato; ?>"
                                <?php checked($is_selected); ?>>
                         <label><?php echo esc_html($servizio['nome_servizio']); ?></label>
                         <div class="mm-service-pricing">
-                            <span class="service-price">€ <?php echo number_format(floatval($servizio['prezzo_default'] ?? 0), 2, ',', '.'); ?></span>
+                            <span class="service-price">€ <?php echo number_format($prezzo_visualizzato, 2, ',', '.'); ?></span>
                             <input type="number"
                                    class="service-discount"
                                    placeholder="0.00"
@@ -283,9 +371,9 @@ $categorie = MM_Database::get_tipi_evento(true);
                 </div>
             </div>
 
-            <!-- Note e Acconto -->
+            <!-- Note e Acconti -->
             <div class="mm-form-section">
-                <h2 class="mm-section-title">📝 Note e Acconto</h2>
+                <h2 class="mm-section-title">📝 Note e Acconti</h2>
                 <div class="mm-form-row">
                     <div class="mm-form-group">
                         <label>Note Aggiuntive</label>
@@ -293,17 +381,45 @@ $categorie = MM_Database::get_tipi_evento(true);
                                   placeholder="Inserisci eventuali note o richieste speciali..."><?php echo esc_textarea($preventivo['note']); ?></textarea>
                     </div>
                 </div>
-                <div class="mm-form-row">
-                    <div class="mm-form-group">
-                        <label>Data Acconto</label>
-                        <input type="date" id="data_acconto" name="data_acconto"
-                               value="<?php echo esc_attr($preventivo['data_acconto']); ?>">
+
+                <div style="margin-top: 20px;">
+                    <h3 style="font-size: 16px; color: #e91e63; margin-bottom: 10px;">💳 Gestione Acconti</h3>
+                    <div id="acconti-container">
+                        <?php
+                        // Carica acconti esistenti dal database
+                        $acconti_esistenti = isset($preventivo['acconti']) && is_array($preventivo['acconti']) ? $preventivo['acconti'] : array();
+
+                        // Se non ci sono acconti nella nuova tabella, controlla i vecchi campi per retrocompatibilità
+                        if (empty($acconti_esistenti) && !empty($preventivo['data_acconto']) && floatval($preventivo['importo_acconto']) > 0) {
+                            $acconti_esistenti = array(array(
+                                'data_acconto' => $preventivo['data_acconto'],
+                                'importo_acconto' => $preventivo['importo_acconto']
+                            ));
+                        }
+
+                        // Mostra tutti gli acconti esistenti
+                        foreach ($acconti_esistenti as $acconto) :
+                        ?>
+                        <div class="acconto-item" style="display: flex; gap: 15px; margin-bottom: 10px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #4caf50;">
+                            <div style="flex: 1;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 600; font-size: 12px; color: #666;">Data Acconto</label>
+                                <input type="date" name="acconti_data[]" class="acconto-data" value="<?php echo esc_attr($acconto['data_acconto']); ?>" style="width: 100%; padding: 8px; border: 2px solid #e0e0e0; border-radius: 6px;">
+                            </div>
+                            <div style="flex: 1;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 600; font-size: 12px; color: #666;">Importo (€)</label>
+                                <input type="number" name="acconti_importo[]" class="acconto-importo" value="<?php echo floatval($acconto['importo_acconto']); ?>" placeholder="0.00" step="0.01" min="0" style="width: 100%; padding: 8px; border: 2px solid #e0e0e0; border-radius: 6px;">
+                            </div>
+                            <div style="display: flex; align-items: flex-end;">
+                                <button type="button" class="rimuovi-acconto" style="padding: 8px 15px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">✕ Rimuovi</button>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
                     </div>
-                    <div class="mm-form-group">
-                        <label>Importo Acconto (€)</label>
-                        <input type="number" id="importo_acconto" name="importo_acconto"
-                               value="<?php echo floatval($preventivo['importo_acconto']); ?>"
-                               placeholder="0.00" step="0.01" min="0">
+                    <button type="button" id="aggiungi-acconto" style="margin-top: 10px; padding: 10px 20px; background: linear-gradient(135deg, #4caf50 0%, #45a049 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);">
+                        ➕ Aggiungi Acconto
+                    </button>
+                    <div id="totale-acconti" style="margin-top: 15px; padding: 12px; background: #e8f5e9; border-radius: 8px; font-weight: 600; color: #2e7d32;">
+                        Totale Acconti: € <span id="somma-acconti">0,00</span>
                     </div>
                 </div>
             </div>
@@ -466,15 +582,24 @@ jQuery(document).ready(function($) {
     const $form = $('#mm-edit-preventivo-form');
     const preventivoId = $form.data('preventivo-id');
 
-    // Calcola totali all'avvio
-    calculateTotals();
+    // Calcola totali all'avvio (con piccolo ritardo per assicurare che tutto sia caricato)
+    setTimeout(function() {
+        calculateTotals();
+        calcolaTotaleAcconti();
+    }, 100);
 
     // Eventi per ricalcolo
-    $('.service-checkbox, .service-discount, #sconto, #sconto_percentuale, #applica_enpals, #applica_iva').on('change input', calculateTotals);
+    $('.service-checkbox, .service-discount, #sconto, #sconto_percentuale, #applica_enpals, #applica_iva, #prezzo_cerimonia').on('change input', calculateTotals);
 
     // Funzione calcolo totali
     function calculateTotals() {
         let totaleServizi = 0;
+
+        // Aggiungi prezzo rito se presente
+        const prezzoRito = parseFloat($('#prezzo_cerimonia').val()) || 0;
+        if (prezzoRito > 0) {
+            totaleServizi += prezzoRito;
+        }
 
         // Calcola totale servizi selezionati
         $('.service-checkbox:checked').each(function() {
@@ -495,30 +620,41 @@ jQuery(document).ready(function($) {
 
         $('#subtotale').text('€ ' + subtotale.toFixed(2).replace('.', ','));
 
-        // ENPALS e IVA
-        let enpals = 0;
+        // ENPALS e IVA (calcolo corretto come nel backend)
+        let enpalsCommittente = 0;
+        let enpalsLavoratore = 0;
         let iva = 0;
-        let totale = subtotale;
+        let imponibileIva = subtotale;
 
         if ($('#applica_enpals').is(':checked')) {
-            const enpalsPercentage = <?php echo floatval(get_option('mm_preventivi_enpals_percentage', 33)); ?> / 100;
-            enpals = subtotale * enpalsPercentage;
-            totale += enpals;
+            // Calcola ENPALS committente (23.81%) e lavoratore (9.19%)
+            const enpalsCommittentePerc = <?php echo floatval(get_option('mm_preventivi_enpals_committente_percentage', 23.81)); ?> / 100;
+            const enpalsLavoratorePerc = <?php echo floatval(get_option('mm_preventivi_enpals_lavoratore_percentage', 9.19)); ?> / 100;
+
+            enpalsCommittente = subtotale * enpalsCommittentePerc;
+            enpalsLavoratore = subtotale * enpalsLavoratorePerc;
+
+            // Solo l'ENPALS committente viene aggiunto al totale
+            imponibileIva = subtotale + enpalsCommittente;
+
+            // Mostra il totale netto (committente - lavoratore) come display
+            const enpalsNetto = enpalsCommittente;
             $('#row-enpals').show();
-            $('#importo-enpals').text('€ ' + enpals.toFixed(2).replace('.', ','));
+            $('#importo-enpals').text('€ ' + enpalsNetto.toFixed(2).replace('.', ','));
         } else {
             $('#row-enpals').hide();
         }
 
         if ($('#applica_iva').is(':checked')) {
-            iva = subtotale * 0.22;
-            totale += iva;
+            const ivaPerc = <?php echo floatval(get_option('mm_preventivi_iva_percentage', 22)); ?> / 100;
+            iva = imponibileIva * ivaPerc;
             $('#row-iva').show();
             $('#importo-iva').text('€ ' + iva.toFixed(2).replace('.', ','));
         } else {
             $('#row-iva').hide();
         }
 
+        const totale = imponibileIva + iva;
         $('#totale-finale').text('€ ' + totale.toFixed(2).replace('.', ','));
     }
 
@@ -532,23 +668,66 @@ jQuery(document).ready(function($) {
 
         // Raccogli servizi selezionati
         const servizi = [];
+
+        // Aggiungi rito come servizio se ha un prezzo
+        const prezzoRito = parseFloat($('#prezzo_cerimonia').val()) || 0;
+        if (prezzoRito > 0) {
+            servizi.push({
+                nome_servizio: 'Rito',
+                prezzo: prezzoRito,
+                sconto: 0
+            });
+        }
+
         $('.service-checkbox:checked').each(function() {
             const $checkbox = $(this);
             const serviceId = $checkbox.data('service-id');
             const sconto = parseFloat($('.service-discount[data-service-id="' + serviceId + '"]').val()) || 0;
 
             servizi.push({
-                nome: $checkbox.data('service-name'),
+                nome_servizio: $checkbox.data('service-name'),
                 prezzo: parseFloat($checkbox.data('service-price')),
                 sconto: sconto
             });
         });
+
+        // Raccogli cerimonia (rito)
+        const cerimonia = [];
+        $('input[name="cerimonia[]"]:checked').each(function() {
+            cerimonia.push($(this).val());
+        });
+
+        // Raccogli servizi extra
+        const serviziExtra = [];
+        $('input[name="servizi_extra[]"]:checked').each(function() {
+            serviziExtra.push($(this).val());
+        });
+
+        // Raccogli acconti multipli
+        const accontiData = [];
+        const accontiImporto = [];
+        $('input[name="acconti_data[]"]').each(function(index) {
+            const data = $(this).val();
+            const importo = $('input[name="acconti_importo[]"]').eq(index).val();
+            if (data && importo && parseFloat(importo) > 0) {
+                accontiData.push(data);
+                accontiImporto.push(parseFloat(importo));
+            }
+        });
+
+        // Calcola ENPALS committente e lavoratore per il salvataggio
+        const subtotale = parseFloat($('#subtotale').text().replace('€ ', '').replace(',', '.'));
+        const enpalsCommittentePerc = <?php echo floatval(get_option('mm_preventivi_enpals_committente_percentage', 23.81)); ?> / 100;
+        const enpalsLavoratorePerc = <?php echo floatval(get_option('mm_preventivi_enpals_lavoratore_percentage', 9.19)); ?> / 100;
+        const enpalsCommittente = $('#applica_enpals').is(':checked') ? (subtotale * enpalsCommittentePerc) : 0;
+        const enpalsLavoratore = $('#applica_enpals').is(':checked') ? (subtotale * enpalsLavoratorePerc) : 0;
 
         // Prepara dati
         const formData = {
             action: 'mm_update_preventivo',
             nonce: mmPreventivi.nonce,
             preventivo_id: preventivoId,
+            categoria_id: $('#categoria_id').val(),
             data_preventivo: $('#data_preventivo').val(),
             sposi: $('#sposi').val(),
             email: $('#email').val(),
@@ -556,17 +735,20 @@ jQuery(document).ready(function($) {
             data_evento: $('#data_evento').val(),
             location: $('#location').val(),
             tipo_evento: $('input[name="tipo_evento"]:checked').val(),
+            cerimonia: cerimonia,
+            servizi_extra: serviziExtra,
             servizi: servizi,
             note: $('#note').val(),
-            data_acconto: $('#data_acconto').val(),
-            importo_acconto: parseFloat($('#importo_acconto').val()) || 0,
+            acconti_data: accontiData,
+            acconti_importo: accontiImporto,
             sconto: parseFloat($('#sconto').val()) || 0,
             sconto_percentuale: parseFloat($('#sconto_percentuale').val()) || 0,
             applica_enpals: $('#applica_enpals').is(':checked') ? 1 : 0,
             applica_iva: $('#applica_iva').is(':checked') ? 1 : 0,
+            enpals_committente: enpalsCommittente,
+            enpals_lavoratore: enpalsLavoratore,
             stato: $('#nuovo_stato').val(),
             totale_servizi: parseFloat($('#totale-servizi').text().replace('€ ', '').replace(',', '.')),
-            enpals: parseFloat($('#importo-enpals').text().replace('€ ', '').replace(',', '.')) || 0,
             iva: parseFloat($('#importo-iva').text().replace('€ ', '').replace(',', '.')) || 0,
             totale: parseFloat($('#totale-finale').text().replace('€ ', '').replace(',', '.'))
         };
@@ -598,5 +780,52 @@ jQuery(document).ready(function($) {
         const url = mmPreventivi.ajaxurl + '?action=mm_view_pdf&id=' + preventivoId + '&nonce=' + pdfNonce;
         window.open(url, '_blank');
     });
+
+    // Gestione Acconti Multipli
+    let accontoCounter = 0;
+
+    // Aggiungi acconto
+    $('#aggiungi-acconto').on('click', function() {
+        const accontoHtml = `
+            <div class="acconto-item" style="display: flex; gap: 15px; margin-bottom: 10px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #4caf50;">
+                <div style="flex: 1;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 600; font-size: 12px; color: #666;">Data Acconto</label>
+                    <input type="date" name="acconti_data[]" style="width: 100%; padding: 8px; border: 2px solid #e0e0e0; border-radius: 6px;">
+                </div>
+                <div style="flex: 1;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 600; font-size: 12px; color: #666;">Importo (€)</label>
+                    <input type="number" name="acconti_importo[]" class="acconto-importo" placeholder="0.00" step="0.01" min="0" style="width: 100%; padding: 8px; border: 2px solid #e0e0e0; border-radius: 6px;">
+                </div>
+                <div style="display: flex; align-items: flex-end;">
+                    <button type="button" class="rimuovi-acconto" style="padding: 8px 15px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">✕ Rimuovi</button>
+                </div>
+            </div>
+        `;
+        $('#acconti-container').append(accontoHtml);
+        calcolaTotaleAcconti();
+    });
+
+    // Rimuovi acconto
+    $(document).on('click', '.rimuovi-acconto', function() {
+        $(this).closest('.acconto-item').remove();
+        calcolaTotaleAcconti();
+    });
+
+    // Ricalcola totale acconti quando cambiano gli importi
+    $(document).on('change input', '.acconto-importo, input[name="acconti_importo[]"]', function() {
+        calcolaTotaleAcconti();
+    });
+
+    // Funzione per calcolare il totale degli acconti
+    function calcolaTotaleAcconti() {
+        let totale = 0;
+        $('input[name="acconti_importo[]"]').each(function() {
+            totale += parseFloat($(this).val()) || 0;
+        });
+        $('#somma-acconti').text(totale.toFixed(2).replace('.', ','));
+    }
+
+    // Calcola totale acconti all'avvio
+    calcolaTotaleAcconti();
 });
 </script>

@@ -30,6 +30,11 @@ class MM_Database {
     private static $table_tipi_evento = 'mm_tipi_evento';
 
     /**
+     * Nome tabella acconti
+     */
+    private static $table_acconti = 'mm_preventivi_acconti';
+
+    /**
      * Crea tabelle database
      */
     public static function create_tables() {
@@ -40,6 +45,7 @@ class MM_Database {
         $table_servizi = $wpdb->prefix . self::$table_servizi;
         $table_catalogo = $wpdb->prefix . self::$table_catalogo_servizi;
         $table_tipi_evento = $wpdb->prefix . self::$table_tipi_evento;
+        $table_acconti = $wpdb->prefix . self::$table_acconti;
 
         // Tabella tipi evento
         $sql_tipi_evento = "CREATE TABLE IF NOT EXISTS $table_tipi_evento (
@@ -124,11 +130,25 @@ class MM_Database {
             KEY categoria (categoria)
         ) $charset_collate;";
 
+        // Tabella acconti
+        $sql_acconti = "CREATE TABLE IF NOT EXISTS $table_acconti (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            preventivo_id bigint(20) UNSIGNED NOT NULL,
+            data_acconto date NOT NULL,
+            importo_acconto decimal(10,2) NOT NULL,
+            created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY preventivo_id (preventivo_id),
+            CONSTRAINT fk_preventivo_acconto FOREIGN KEY (preventivo_id)
+                REFERENCES $table_preventivi(id) ON DELETE CASCADE
+        ) $charset_collate;";
+
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
         dbDelta($sql_tipi_evento);
         dbDelta($sql_preventivi);
         dbDelta($sql_servizi);
         dbDelta($sql_catalogo);
+        dbDelta($sql_acconti);
 
         // Ottimizzazione: usa una singola query per verificare tutte le colonne
         $existing_columns_servizi = $wpdb->get_col("SHOW COLUMNS FROM $table_servizi");
@@ -180,6 +200,17 @@ class MM_Database {
             $migrations[] = "ALTER TABLE $table_preventivi ADD COLUMN enpals_lavoratore decimal(10,2) NOT NULL DEFAULT 0 AFTER enpals_committente";
         }
 
+        // Migrazione public token per condivisione pubblica (v1.2.1)
+        if (!in_array('public_token', $existing_columns_preventivi)) {
+            $migrations[] = "ALTER TABLE $table_preventivi ADD COLUMN public_token varchar(64) DEFAULT NULL AFTER stato";
+            error_log('MM Preventivi - Aggiunta colonna public_token');
+        }
+
+        if (!in_array('token_expires', $existing_columns_preventivi)) {
+            $migrations[] = "ALTER TABLE $table_preventivi ADD COLUMN token_expires datetime DEFAULT NULL AFTER public_token";
+            error_log('MM Preventivi - Aggiunta colonna token_expires');
+        }
+
         // Esegui tutte le migrazioni in modo sicuro
         foreach ($migrations as $migration_query) {
             $result = $wpdb->query($migration_query);
@@ -218,7 +249,44 @@ class MM_Database {
         // Salva versione database
         update_option('mm_preventivi_db_version', MM_PREVENTIVI_VERSION);
     }
-    
+
+    /**
+     * Esegue solo le migrazioni necessarie (può essere chiamato ad ogni init)
+     */
+    public static function run_migrations() {
+        global $wpdb;
+
+        $table_preventivi = $wpdb->prefix . self::$table_preventivi;
+
+        // Verifica se la tabella esiste
+        $table_exists = $wpdb->get_var("SHOW TABLES LIKE '$table_preventivi'");
+        if (!$table_exists) {
+            return; // Tabella non esiste ancora, sarà creata all'attivazione
+        }
+
+        // Ottieni colonne esistenti
+        $existing_columns = $wpdb->get_col("SHOW COLUMNS FROM $table_preventivi");
+
+        // Migrazione public token per condivisione pubblica (v1.2.1)
+        if (!in_array('public_token', $existing_columns)) {
+            $result = $wpdb->query("ALTER TABLE $table_preventivi ADD COLUMN public_token varchar(64) DEFAULT NULL AFTER stato");
+            if ($result !== false) {
+                error_log('MM Preventivi - Migrazione: aggiunta colonna public_token');
+            } else {
+                error_log('MM Preventivi - Errore migrazione public_token: ' . $wpdb->last_error);
+            }
+        }
+
+        if (!in_array('token_expires', $existing_columns)) {
+            $result = $wpdb->query("ALTER TABLE $table_preventivi ADD COLUMN token_expires datetime DEFAULT NULL AFTER public_token");
+            if ($result !== false) {
+                error_log('MM Preventivi - Migrazione: aggiunta colonna token_expires');
+            } else {
+                error_log('MM Preventivi - Errore migrazione token_expires: ' . $wpdb->last_error);
+            }
+        }
+    }
+
     /**
      * Salva preventivo con transazione atomica
      */
@@ -332,11 +400,19 @@ class MM_Database {
             // Inserisci servizi
             if (isset($data['servizi']) && is_array($data['servizi'])) {
                 foreach ($data['servizi'] as $servizio) {
+                    // Supporta sia 'nome' che 'nome_servizio' per retrocompatibilità
+                    $nome_servizio = isset($servizio['nome_servizio']) ? $servizio['nome_servizio'] : (isset($servizio['nome']) ? $servizio['nome'] : '');
+
+                    // Salta servizi senza nome
+                    if (empty($nome_servizio)) {
+                        continue;
+                    }
+
                     $servizio_result = $wpdb->insert(
                         $table_servizi,
                         array(
                             'preventivo_id' => $preventivo_id,
-                            'nome_servizio' => $servizio['nome'],
+                            'nome_servizio' => $nome_servizio,
                             'prezzo' => $servizio['prezzo'],
                             'sconto' => isset($servizio['sconto']) ? $servizio['sconto'] : 0
                         ),
@@ -348,6 +424,31 @@ class MM_Database {
                             __('Errore nell\'inserimento del servizio: %s', 'mm-preventivi'),
                             $wpdb->last_error
                         ));
+                    }
+                }
+            }
+
+            // Inserisci acconti multipli
+            $table_acconti = $wpdb->prefix . self::$table_acconti;
+            if (isset($data['acconti']) && is_array($data['acconti'])) {
+                foreach ($data['acconti'] as $acconto) {
+                    if (!empty($acconto['data_acconto']) && !empty($acconto['importo_acconto'])) {
+                        $acconto_result = $wpdb->insert(
+                            $table_acconti,
+                            array(
+                                'preventivo_id' => $preventivo_id,
+                                'data_acconto' => $acconto['data_acconto'],
+                                'importo_acconto' => floatval($acconto['importo_acconto'])
+                            ),
+                            array('%d', '%s', '%f')
+                        );
+
+                        if ($acconto_result === false) {
+                            throw new Exception(sprintf(
+                                __('Errore nell\'inserimento dell\'acconto: %s', 'mm-preventivi'),
+                                $wpdb->last_error
+                            ));
+                        }
                     }
                 }
             }
@@ -413,6 +514,15 @@ class MM_Database {
 
         $preventivo['servizi'] = $servizi;
 
+        // Ottieni acconti
+        $table_acconti = $wpdb->prefix . self::$table_acconti;
+        $acconti = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM $table_acconti WHERE preventivo_id = %d ORDER BY data_acconto ASC",
+            $id
+        ), ARRAY_A);
+
+        $preventivo['acconti'] = $acconti;
+
         // Salva in cache (1 ora)
         self::set_to_cache($cache_key, $preventivo, 3600);
 
@@ -437,6 +547,7 @@ class MM_Database {
 
         $table_preventivi = $wpdb->prefix . self::$table_preventivi;
         $table_tipi_evento = $wpdb->prefix . self::$table_tipi_evento;
+        $table_acconti = $wpdb->prefix . self::$table_acconti;
 
         $where = array('1=1');
         $where_values = array();
@@ -472,16 +583,52 @@ class MM_Database {
 
         $where_clause = implode(' AND ', $where);
 
+        // Ordinamento
+        $order_by = 'p.data_evento DESC'; // Default: ordina per data evento (più recente prima)
+        if (isset($filters['order_by'])) {
+            switch ($filters['order_by']) {
+                case 'data_evento_asc':
+                    $order_by = 'p.data_evento ASC';
+                    break;
+                case 'data_evento_desc':
+                    $order_by = 'p.data_evento DESC';
+                    break;
+                case 'data_preventivo_asc':
+                    $order_by = 'p.data_preventivo ASC';
+                    break;
+                case 'data_preventivo_desc':
+                    $order_by = 'p.data_preventivo DESC';
+                    break;
+                case 'numero_preventivo_asc':
+                    $order_by = 'p.numero_preventivo ASC';
+                    break;
+                case 'numero_preventivo_desc':
+                    $order_by = 'p.numero_preventivo DESC';
+                    break;
+                case 'totale_asc':
+                    $order_by = 'p.totale ASC';
+                    break;
+                case 'totale_desc':
+                    $order_by = 'p.totale DESC';
+                    break;
+                default:
+                    $order_by = 'p.data_evento DESC';
+            }
+        }
+
         // Paginazione
         $per_page = isset($filters['per_page']) ? intval($filters['per_page']) : 50;
         $page = isset($filters['page']) ? intval($filters['page']) : 1;
         $offset = ($page - 1) * $per_page;
 
-        $query = "SELECT p.*, te.nome as categoria_nome, te.icona as categoria_icona
+        $query = "SELECT p.*,
+                         te.nome as categoria_nome,
+                         te.icona as categoria_icona,
+                         COALESCE((SELECT SUM(importo_acconto) FROM $table_acconti WHERE preventivo_id = p.id), 0) as totale_acconti
                   FROM $table_preventivi p
                   LEFT JOIN $table_tipi_evento te ON p.categoria_id = te.id
                   WHERE $where_clause
-                  ORDER BY p.data_evento DESC
+                  ORDER BY $order_by
                   LIMIT %d OFFSET %d";
 
         // Aggiungi parametri paginazione
@@ -893,6 +1040,11 @@ class MM_Database {
             // Inserisci servizi aggiornati
             if (isset($data['servizi']) && is_array($data['servizi'])) {
                 foreach ($data['servizi'] as $servizio) {
+                    // Salta servizi senza nome
+                    if (empty($servizio['nome_servizio'])) {
+                        continue;
+                    }
+
                     $insert_result = $wpdb->insert(
                         $table_servizi,
                         array(
@@ -910,11 +1062,51 @@ class MM_Database {
                 }
             }
 
+            // Gestione acconti multipli
+            $table_acconti = $wpdb->prefix . self::$table_acconti;
+
+            // Verifica esistenza tabella acconti
+            $table_exists = $wpdb->get_var("SHOW TABLES LIKE '$table_acconti'");
+            if (!$table_exists) {
+                error_log('MM Preventivi - ATTENZIONE: La tabella acconti non esiste! Creazione tabelle...');
+                self::create_tables();
+            }
+
+            // Elimina acconti esistenti
+            $delete_acconti_result = $wpdb->delete($table_acconti, array('preventivo_id' => $id), array('%d'));
+            if ($delete_acconti_result === false) {
+                throw new Exception(__('Errore nella rimozione degli acconti esistenti: ', 'mm-preventivi') . $wpdb->last_error);
+            }
+
+            // Inserisci acconti aggiornati
+            if (isset($data['acconti']) && is_array($data['acconti'])) {
+                foreach ($data['acconti'] as $acconto) {
+                    if (!empty($acconto['data_acconto']) && !empty($acconto['importo_acconto'])) {
+                        $insert_acconto_result = $wpdb->insert(
+                            $table_acconti,
+                            array(
+                                'preventivo_id' => $id,
+                                'data_acconto' => $acconto['data_acconto'],
+                                'importo_acconto' => floatval($acconto['importo_acconto'])
+                            ),
+                            array('%d', '%s', '%f')
+                        );
+
+                        if ($insert_acconto_result === false) {
+                            throw new Exception(__('Errore nell\'inserimento degli acconti aggiornati: ', 'mm-preventivi') . $wpdb->last_error);
+                        }
+                    }
+                }
+            }
+
             // Commit transazione
             $wpdb->query('COMMIT');
 
-            // Invalida cache
+            // Invalida cache in modo aggressivo
             self::clear_preventivo_cache($id);
+            // Invalida TUTTA la cache delle liste (non solo il singolo preventivo)
+            wp_cache_delete('all_preventivi', 'mm_preventivi');
+            wp_cache_flush(); // Svuota tutta la cache
 
             return true;
 

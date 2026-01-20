@@ -63,6 +63,7 @@ class MM_Preventivi {
         require_once MM_PREVENTIVI_PLUGIN_DIR . 'includes/class-mm-frontend.php';
         require_once MM_PREVENTIVI_PLUGIN_DIR . 'admin/class-mm-admin.php';
         require_once MM_PREVENTIVI_PLUGIN_DIR . 'includes/class-mm-pdf-generator.php';
+        require_once MM_PREVENTIVI_PLUGIN_DIR . 'includes/class-mm-email.php';
     }
     
     /**
@@ -83,6 +84,9 @@ class MM_Preventivi {
 
         // Noindex per pagine admin del plugin
         add_action('admin_head', array($this, 'add_noindex_meta'));
+
+        // Viewport meta tag per ottimizzazione mobile
+        add_action('wp_head', array($this, 'add_viewport_meta'), 1);
 
         // Shortcodes
         add_shortcode('mm_preventivo_form', array($this, 'render_form_shortcode'));
@@ -209,8 +213,78 @@ class MM_Preventivi {
     public function init() {
         load_plugin_textdomain('mm-preventivi', false, dirname(MM_PREVENTIVI_PLUGIN_BASENAME) . '/languages');
 
-        // Le pagine vengono create solo all'attivazione, non ad ogni caricamento
-        // Rimosso check ridondante per migliorare performance
+        // Esegui migrazioni database se necessario
+        MM_Database::run_migrations();
+
+        // Intercetta richieste per preventivi pubblici PRIMA di WordPress
+        $this->handle_public_preventivo_request();
+    }
+
+    /**
+     * Gestisce le richieste per preventivi pubblici
+     * Analizza direttamente l'URL per massima affidabilità
+     */
+    private function handle_public_preventivo_request() {
+        // Ottieni il path richiesto
+        $request_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+
+        // Rimuovi query string se presente
+        $path = parse_url($request_uri, PHP_URL_PATH);
+
+        // Rimuovi trailing slash e ottieni il path pulito
+        $path = trim($path, '/');
+
+        // Verifica se corrisponde al pattern /preventivo/{id}/{token}
+        if (preg_match('#^preventivo/(\d+)/([a-f0-9]{64})$#i', $path, $matches)) {
+            $preventivo_id = intval($matches[1]);
+            $token = sanitize_text_field($matches[2]);
+
+            // Renderizza il preventivo e termina
+            $this->render_public_preventivo($preventivo_id, $token);
+            exit;
+        }
+    }
+
+    /**
+     * Renderizza preventivo pubblico
+     */
+    private function render_public_preventivo($preventivo_id, $token) {
+        // Valida token
+        if (!MM_Frontend::validate_public_token($preventivo_id, $token)) {
+            wp_die(
+                '<div style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                    <h1 style="color: #e91e63;">Link non valido o scaduto</h1>
+                    <p>Il link che hai utilizzato non è più valido.</p>
+                    <p>Contatta il fornitore per ricevere un nuovo link al preventivo.</p>
+                </div>',
+                'Accesso negato',
+                array('response' => 403)
+            );
+        }
+
+        // Carica preventivo
+        $preventivo = MM_Database::get_preventivo($preventivo_id);
+
+        if (!$preventivo) {
+            wp_die(
+                '<div style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                    <h1 style="color: #e91e63;">Preventivo non trovato</h1>
+                    <p>Il preventivo richiesto non esiste.</p>
+                </div>',
+                'Non trovato',
+                array('response' => 404)
+            );
+        }
+
+        // Log accesso pubblico
+        MM_Security::log_security_event('public_preventivo_view', array(
+            'preventivo_id' => $preventivo_id,
+            'ip' => $_SERVER['REMOTE_ADDR']
+        ));
+
+        // Genera HTML del preventivo
+        MM_PDF_Generator::generate_pdf($preventivo);
+        exit;
     }
     
     /**
@@ -302,6 +376,23 @@ class MM_Preventivi {
         // Verifica se siamo in una pagina del plugin
         if ($screen && strpos($screen->id, 'mm-preventivi') !== false) {
             echo '<meta name="robots" content="noindex, nofollow">' . "\n";
+        }
+    }
+
+    /**
+     * Aggiungi viewport meta tag per ottimizzazione mobile
+     */
+    public function add_viewport_meta() {
+        // Verifica se siamo su una pagina del plugin
+        global $post;
+        if ($post && (has_shortcode($post->post_content, 'mm_preventivo_form') ||
+                      has_shortcode($post->post_content, 'mm_preventivi_dashboard') ||
+                      has_shortcode($post->post_content, 'mm_preventivi_list') ||
+                      has_shortcode($post->post_content, 'mm_preventivi_stats'))) {
+            // Aggiungi viewport solo se non già presente (verifica tramite flag WordPress)
+            if (!current_theme_supports('responsive-embeds')) {
+                echo '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">' . "\n";
+            }
         }
     }
 

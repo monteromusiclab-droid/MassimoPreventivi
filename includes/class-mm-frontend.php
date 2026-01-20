@@ -21,6 +21,18 @@ class MM_Frontend {
         add_action('wp_ajax_nopriv_mm_update_preventivo', array($this, 'ajax_update_preventivo'));
         add_action('wp_ajax_mm_get_preventivo_details', array($this, 'ajax_get_preventivo_details'));
         add_action('wp_ajax_nopriv_mm_get_preventivo_details', array($this, 'ajax_get_preventivo_details'));
+        add_action('wp_ajax_mm_send_preventivo_email', array($this, 'ajax_send_preventivo_email'));
+        add_action('wp_ajax_nopriv_mm_send_preventivo_email', array($this, 'ajax_send_preventivo_email'));
+        add_action('wp_ajax_mm_get_whatsapp_link', array($this, 'ajax_get_whatsapp_link'));
+        add_action('wp_ajax_nopriv_mm_get_whatsapp_link', array($this, 'ajax_get_whatsapp_link'));
+
+        // Handler per visualizzazione pubblica preventivi
+        add_action('wp_ajax_mm_view_public_preventivo', array($this, 'ajax_view_public_preventivo'));
+        add_action('wp_ajax_nopriv_mm_view_public_preventivo', array($this, 'ajax_view_public_preventivo'));
+
+        // Handler per download PDF
+        add_action('wp_ajax_mm_download_pdf', array($this, 'ajax_download_pdf'));
+        add_action('wp_ajax_nopriv_mm_download_pdf', array($this, 'ajax_download_pdf'));
 
         // Shortcodes per le pagine frontend
         add_shortcode('mm_preventivi_list', array($this, 'render_preventivi_list'));
@@ -303,6 +315,8 @@ class MM_Frontend {
             'data_evento' => isset($_POST['data_evento']) ? sanitize_text_field($_POST['data_evento']) : '',
             'location' => isset($_POST['location']) ? sanitize_text_field($_POST['location']) : '',
             'tipo_evento' => isset($_POST['tipo_evento']) ? sanitize_text_field($_POST['tipo_evento']) : '',
+            'cerimonia' => isset($_POST['cerimonia']) && is_array($_POST['cerimonia']) ? json_encode(array_map('sanitize_text_field', $_POST['cerimonia'])) : json_encode(array()),
+            'servizi_extra' => isset($_POST['servizi_extra']) && is_array($_POST['servizi_extra']) ? json_encode(array_map('sanitize_text_field', $_POST['servizi_extra'])) : json_encode(array()),
             'note' => isset($_POST['note']) ? sanitize_textarea_field($_POST['note']) : '',
             'totale_servizi' => isset($_POST['totale_servizi']) ? floatval($_POST['totale_servizi']) : 0,
             'sconto' => isset($_POST['sconto']) ? floatval($_POST['sconto']) : 0,
@@ -322,12 +336,32 @@ class MM_Frontend {
         if (isset($_POST['servizi']) && is_array($_POST['servizi'])) {
             foreach ($_POST['servizi'] as $servizio) {
                 $data['servizi'][] = array(
-                    'nome_servizio' => sanitize_text_field($servizio['nome']),
+                    'nome_servizio' => sanitize_text_field($servizio['nome_servizio']),
                     'prezzo' => floatval($servizio['prezzo']),
                     'sconto' => isset($servizio['sconto']) ? floatval($servizio['sconto']) : 0
                 );
             }
         }
+
+        // Processa acconti multipli
+        $data['acconti'] = array();
+        if (isset($_POST['acconti_data']) && is_array($_POST['acconti_data']) &&
+            isset($_POST['acconti_importo']) && is_array($_POST['acconti_importo'])) {
+
+            error_log('MM Preventivi - Acconti POST ricevuti: data=' . print_r($_POST['acconti_data'], true) . ', importo=' . print_r($_POST['acconti_importo'], true));
+
+            $count = min(count($_POST['acconti_data']), count($_POST['acconti_importo']));
+            for ($i = 0; $i < $count; $i++) {
+                if (!empty($_POST['acconti_data'][$i]) && !empty($_POST['acconti_importo'][$i])) {
+                    $data['acconti'][] = array(
+                        'data_acconto' => sanitize_text_field($_POST['acconti_data'][$i]),
+                        'importo_acconto' => floatval($_POST['acconti_importo'][$i])
+                    );
+                }
+            }
+        }
+
+        error_log('MM Preventivi - Acconti processati: ' . print_r($data['acconti'], true));
 
         // Aggiorna nel database
         $result = MM_Database::update_preventivo($preventivo_id, $data);
@@ -402,6 +436,268 @@ class MM_Frontend {
 
         // Restituisci dati
         wp_send_json_success($preventivo);
+    }
+
+    /**
+     * AJAX: Invia preventivo via email
+     */
+    public function ajax_send_preventivo_email() {
+        // Verifica nonce (supporta sia mm_preventivi_nonce che mm_send_email)
+        $nonce_valid = false;
+        if (isset($_POST['nonce'])) {
+            $nonce_valid = wp_verify_nonce($_POST['nonce'], 'mm_preventivi_nonce') ||
+                          wp_verify_nonce($_POST['nonce'], 'mm_send_email');
+        }
+
+        if (!$nonce_valid) {
+            wp_send_json_error(array(
+                'message' => __('Richiesta non valida.', 'mm-preventivi')
+            ));
+        }
+
+        // Verifica autenticazione
+        if (!MM_Auth::is_logged_in()) {
+            wp_send_json_error(array(
+                'message' => __('Devi essere autenticato.', 'mm-preventivi')
+            ));
+        }
+
+        // Ottieni ID preventivo
+        $preventivo_id = isset($_POST['preventivo_id']) ? intval($_POST['preventivo_id']) : 0;
+
+        if (!$preventivo_id) {
+            wp_send_json_error(array(
+                'message' => __('ID preventivo mancante.', 'mm-preventivi')
+            ));
+        }
+
+        // Invia email
+        $result = MM_Email::send_preventivo($preventivo_id);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(array(
+                'message' => $result->get_error_message()
+            ));
+        }
+
+        wp_send_json_success(array(
+            'message' => __('Email inviata con successo!', 'mm-preventivi')
+        ));
+    }
+
+    /**
+     * AJAX: Genera link WhatsApp per preventivo
+     */
+    public function ajax_get_whatsapp_link() {
+        // Verifica nonce (supporta sia mm_preventivi_nonce che mm_send_email)
+        $nonce_valid = false;
+        if (isset($_POST['nonce'])) {
+            $nonce_valid = wp_verify_nonce($_POST['nonce'], 'mm_preventivi_nonce') ||
+                          wp_verify_nonce($_POST['nonce'], 'mm_send_email');
+        }
+
+        if (!$nonce_valid) {
+            wp_send_json_error(array(
+                'message' => __('Richiesta non valida.', 'mm-preventivi')
+            ));
+        }
+
+        // Verifica autenticazione
+        if (!MM_Auth::is_logged_in()) {
+            wp_send_json_error(array(
+                'message' => __('Devi essere autenticato.', 'mm-preventivi')
+            ));
+        }
+
+        // Ottieni ID preventivo
+        $preventivo_id = isset($_POST['preventivo_id']) ? intval($_POST['preventivo_id']) : 0;
+
+        if (!$preventivo_id) {
+            wp_send_json_error(array(
+                'message' => __('ID preventivo mancante.', 'mm-preventivi')
+            ));
+        }
+
+        // Genera link WhatsApp
+        $link = MM_Email::generate_whatsapp_link($preventivo_id);
+
+        if (is_wp_error($link)) {
+            wp_send_json_error(array(
+                'message' => $link->get_error_message()
+            ));
+        }
+
+        // Log evento
+        MM_Security::log_security_event('whatsapp_link_generated', array(
+            'preventivo_id' => $preventivo_id
+        ));
+
+        wp_send_json_success(array(
+            'link' => $link,
+            'message' => __('Link WhatsApp generato!', 'mm-preventivi')
+        ));
+    }
+
+    /**
+     * Genera token di accesso pubblico per un preventivo
+     */
+    public static function generate_public_token($preventivo_id) {
+        // Genera token basato su ID preventivo + salt + timestamp
+        $salt = wp_salt('auth');
+        $token = hash('sha256', $preventivo_id . $salt . get_option('mm_preventivi_secret_key', AUTH_KEY));
+
+        // Salva token nel database con scadenza (45 giorni)
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'mm_preventivi';
+
+        $wpdb->update(
+            $table_name,
+            array(
+                'public_token' => $token,
+                'token_expires' => date('Y-m-d H:i:s', strtotime('+45 days'))
+            ),
+            array('id' => $preventivo_id),
+            array('%s', '%s'),
+            array('%d')
+        );
+
+        return $token;
+    }
+
+    /**
+     * Valida token di accesso pubblico
+     */
+    public static function validate_public_token($preventivo_id, $token) {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'mm_preventivi';
+
+        $preventivo = $wpdb->get_row($wpdb->prepare(
+            "SELECT public_token, token_expires FROM $table_name WHERE id = %d",
+            $preventivo_id
+        ), ARRAY_A);
+
+        if (!$preventivo) {
+            return false;
+        }
+
+        // Verifica token
+        if ($preventivo['public_token'] !== $token) {
+            return false;
+        }
+
+        // Verifica scadenza
+        if (!empty($preventivo['token_expires'])) {
+            $expires = strtotime($preventivo['token_expires']);
+            if ($expires < time()) {
+                return false; // Token scaduto
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * AJAX handler per visualizzazione pubblica preventivo
+     */
+    public function ajax_view_public_preventivo() {
+        // Ottieni parametri
+        $preventivo_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+        $token = isset($_GET['token']) ? sanitize_text_field($_GET['token']) : '';
+
+        if (!$preventivo_id || !$token) {
+            wp_die('Parametri mancanti', 'Errore', array('response' => 400));
+        }
+
+        // Valida token
+        if (!self::validate_public_token($preventivo_id, $token)) {
+            wp_die('Link non valido o scaduto. Contatta il fornitore per ricevere un nuovo link.', 'Accesso negato', array('response' => 403));
+        }
+
+        // Carica preventivo
+        $preventivo = MM_Database::get_preventivo($preventivo_id);
+
+        if (!$preventivo) {
+            wp_die('Preventivo non trovato', 'Errore', array('response' => 404));
+        }
+
+        // Log accesso pubblico
+        MM_Security::log_security_event('public_preventivo_view', array(
+            'preventivo_id' => $preventivo_id,
+            'ip' => $_SERVER['REMOTE_ADDR']
+        ));
+
+        // Genera HTML del preventivo (usa lo stesso metodo del PDF)
+        MM_PDF_Generator::generate_pdf($preventivo);
+        exit;
+    }
+
+    /**
+     * AJAX handler per download PDF reale
+     */
+    public function ajax_download_pdf() {
+        // Ottieni parametri
+        $preventivo_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+        $token = isset($_GET['token']) ? sanitize_text_field($_GET['token']) : '';
+
+        if (!$preventivo_id) {
+            wp_die('ID preventivo mancante', 'Errore', array('response' => 400));
+        }
+
+        // Se c'è un token, valida accesso pubblico
+        if (!empty($token)) {
+            if (!self::validate_public_token($preventivo_id, $token)) {
+                wp_die('Token non valido o scaduto', 'Accesso negato', array('response' => 403));
+            }
+        } else {
+            // Altrimenti richiedi autenticazione
+            if (!MM_Auth::is_logged_in()) {
+                wp_die('Autenticazione richiesta', 'Accesso negato', array('response' => 401));
+            }
+        }
+
+        // Carica preventivo
+        $preventivo = MM_Database::get_preventivo($preventivo_id);
+
+        if (!$preventivo) {
+            wp_die('Preventivo non trovato', 'Errore', array('response' => 404));
+        }
+
+        // Log download PDF
+        MM_Security::log_security_event('pdf_download', array(
+            'preventivo_id' => $preventivo_id,
+            'ip' => $_SERVER['REMOTE_ADDR']
+        ));
+
+        // Genera e scarica PDF reale
+        MM_PDF_Generator::download_real_pdf($preventivo);
+        exit;
+    }
+
+    /**
+     * Genera link pubblico per un preventivo
+     */
+    public static function get_public_link($preventivo_id) {
+        // Genera o recupera token
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'mm_preventivi';
+
+        $preventivo = $wpdb->get_row($wpdb->prepare(
+            "SELECT public_token, token_expires FROM $table_name WHERE id = %d",
+            $preventivo_id
+        ), ARRAY_A);
+
+        // Se non esiste token o è scaduto, genera nuovo
+        if (empty($preventivo['public_token']) ||
+            (!empty($preventivo['token_expires']) && strtotime($preventivo['token_expires']) < time())) {
+            $token = self::generate_public_token($preventivo_id);
+        } else {
+            $token = $preventivo['public_token'];
+        }
+
+        // Genera URL pulito: /preventivo/{id}/{token}
+        $url = home_url('/preventivo/' . $preventivo_id . '/' . $token . '/');
+
+        return $url;
     }
 }
 
