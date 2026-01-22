@@ -247,13 +247,52 @@ class MM_Email {
         }
 
         // Nome file PDF
-        $filename = 'Preventivo_' . $preventivo['numero_preventivo'] . '_' . time() . '.html';
+        $filename = 'Preventivo_' . sanitize_file_name($preventivo['numero_preventivo']) . '_' . time() . '.pdf';
         $filepath = $temp_dir . $filename;
 
-        // Salva HTML come file (il client email lo mostrerà come allegato HTML)
-        file_put_contents($filepath, $html);
+        // Prova a generare PDF con dompdf
+        try {
+            // Verifica che dompdf sia disponibile
+            $dompdf_autoload = MM_PREVENTIVI_PLUGIN_DIR . 'includes/dompdf/autoload.php';
+            if (file_exists($dompdf_autoload)) {
+                require_once $dompdf_autoload;
 
-        return $filepath;
+                $options = new \Dompdf\Options();
+                $options->set('isRemoteEnabled', true);
+                $options->set('isHtml5ParserEnabled', true);
+                $options->set('defaultFont', 'DejaVu Sans');
+                $options->set('tempDir', $temp_dir);
+                $options->set('chroot', $upload_dir['basedir']);
+
+                $dompdf = new \Dompdf\Dompdf($options);
+                $dompdf->loadHtml($html);
+                // Imposta A4 con margini 20mm (56.69 punti)
+                // A4 = 595.28 x 841.89 punti
+                // Con margini 20mm: area utile inizia a 56.69pt dai bordi
+                $dompdf->setPaper('A4', 'portrait');
+                $dompdf->render();
+
+                // Salva PDF su file
+                $pdf_content = $dompdf->output();
+                $result = file_put_contents($filepath, $pdf_content);
+
+                if ($result !== false) {
+                    error_log('MM Email - PDF generato con successo: ' . $filepath);
+                    return $filepath;
+                }
+            } else {
+                error_log('MM Email - Dompdf autoload non trovato: ' . $dompdf_autoload);
+            }
+        } catch (\Exception $e) {
+            error_log('MM Email - Errore generazione PDF: ' . $e->getMessage());
+        }
+
+        // Fallback: salva come HTML se dompdf fallisce
+        $html_filename = 'Preventivo_' . sanitize_file_name($preventivo['numero_preventivo']) . '_' . time() . '.html';
+        $html_filepath = $temp_dir . $html_filename;
+        file_put_contents($html_filepath, $html);
+
+        return $html_filepath;
     }
 
     /**
@@ -708,7 +747,7 @@ class MM_Email {
                 Per qualsiasi domanda o informazione, non esitare a contattarci.
             </p>
             <p style="margin-top: 25px; font-size: 11px; color: #999;">
-                In allegato trovi il preventivo completo in formato HTML.<br>
+                In allegato trovi il preventivo completo in formato PDF.<br>
                 Questo preventivo ha validità 30 giorni dalla data di emissione.<br>
                 © <?php echo date('Y'); ?> <?php echo esc_html($company_name); ?>. Tutti i diritti riservati.
             </p>

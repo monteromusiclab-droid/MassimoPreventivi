@@ -35,6 +35,16 @@ class MM_Database {
     private static $table_acconti = 'mm_preventivi_acconti';
 
     /**
+     * Nome tabella collaboratori
+     */
+    private static $table_collaboratori = 'mm_collaboratori';
+
+    /**
+     * Nome tabella assegnazioni collaboratori a preventivi
+     */
+    private static $table_assegnazioni = 'mm_preventivi_collaboratori';
+
+    /**
      * Crea tabelle database
      */
     public static function create_tables() {
@@ -46,6 +56,8 @@ class MM_Database {
         $table_catalogo = $wpdb->prefix . self::$table_catalogo_servizi;
         $table_tipi_evento = $wpdb->prefix . self::$table_tipi_evento;
         $table_acconti = $wpdb->prefix . self::$table_acconti;
+        $table_collaboratori = $wpdb->prefix . self::$table_collaboratori;
+        $table_assegnazioni = $wpdb->prefix . self::$table_assegnazioni;
 
         // Tabella tipi evento
         $sql_tipi_evento = "CREATE TABLE IF NOT EXISTS $table_tipi_evento (
@@ -143,12 +155,52 @@ class MM_Database {
                 REFERENCES $table_preventivi(id) ON DELETE CASCADE
         ) $charset_collate;";
 
+        // Tabella collaboratori
+        $sql_collaboratori = "CREATE TABLE IF NOT EXISTS $table_collaboratori (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            nome varchar(100) NOT NULL,
+            cognome varchar(100) NOT NULL,
+            mansione varchar(100) NOT NULL,
+            email varchar(255) DEFAULT NULL,
+            whatsapp varchar(50) DEFAULT NULL,
+            note text DEFAULT NULL,
+            attivo tinyint(1) DEFAULT 1,
+            created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY attivo (attivo),
+            KEY mansione (mansione)
+        ) $charset_collate;";
+
+        // Tabella assegnazioni collaboratori a preventivi
+        $sql_assegnazioni = "CREATE TABLE IF NOT EXISTS $table_assegnazioni (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            preventivo_id bigint(20) UNSIGNED NOT NULL,
+            collaboratore_id bigint(20) UNSIGNED NOT NULL,
+            ruolo_evento varchar(255) DEFAULT NULL,
+            compenso decimal(10,2) DEFAULT NULL,
+            note text DEFAULT NULL,
+            notifica_inviata tinyint(1) DEFAULT 0,
+            data_notifica datetime DEFAULT NULL,
+            created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY preventivo_collaboratore (preventivo_id, collaboratore_id),
+            KEY preventivo_id (preventivo_id),
+            KEY collaboratore_id (collaboratore_id),
+            CONSTRAINT fk_assegnazione_preventivo FOREIGN KEY (preventivo_id)
+                REFERENCES $table_preventivi(id) ON DELETE CASCADE,
+            CONSTRAINT fk_assegnazione_collaboratore FOREIGN KEY (collaboratore_id)
+                REFERENCES $table_collaboratori(id) ON DELETE CASCADE
+        ) $charset_collate;";
+
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
         dbDelta($sql_tipi_evento);
         dbDelta($sql_preventivi);
         dbDelta($sql_servizi);
         dbDelta($sql_catalogo);
         dbDelta($sql_acconti);
+        dbDelta($sql_collaboratori);
+        dbDelta($sql_assegnazioni);
 
         // Ottimizzazione: usa una singola query per verificare tutte le colonne
         $existing_columns_servizi = $wpdb->get_col("SHOW COLUMNS FROM $table_servizi");
@@ -1385,5 +1437,497 @@ class MM_Database {
         );
 
         return $result !== false;
+    }
+
+    // ===================================
+    // GESTIONE COLLABORATORI
+    // ===================================
+
+    /**
+     * Ottieni tutti i collaboratori
+     */
+    public static function get_collaboratori($filters = array()) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_collaboratori;
+
+        $where = array('1=1');
+        $where_values = array();
+
+        if (isset($filters['attivo'])) {
+            $where[] = 'attivo = %d';
+            $where_values[] = intval($filters['attivo']);
+        }
+
+        if (isset($filters['mansione']) && !empty($filters['mansione'])) {
+            $where[] = 'mansione = %s';
+            $where_values[] = $filters['mansione'];
+        }
+
+        if (isset($filters['search']) && !empty($filters['search'])) {
+            $where[] = '(nome LIKE %s OR cognome LIKE %s OR email LIKE %s)';
+            $search_term = '%' . $wpdb->esc_like($filters['search']) . '%';
+            $where_values[] = $search_term;
+            $where_values[] = $search_term;
+            $where_values[] = $search_term;
+        }
+
+        $where_clause = implode(' AND ', $where);
+
+        $query = "SELECT * FROM $table WHERE $where_clause ORDER BY cognome ASC, nome ASC";
+
+        if (!empty($where_values)) {
+            $query = $wpdb->prepare($query, $where_values);
+        }
+
+        return $wpdb->get_results($query, ARRAY_A);
+    }
+
+    /**
+     * Ottieni singolo collaboratore
+     */
+    public static function get_collaboratore($id) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_collaboratori;
+
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $table WHERE id = %d",
+            $id
+        ), ARRAY_A);
+    }
+
+    /**
+     * Salva collaboratore
+     */
+    public static function save_collaboratore($data) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_collaboratori;
+
+        $collaboratore_data = array(
+            'nome' => sanitize_text_field($data['nome']),
+            'cognome' => sanitize_text_field($data['cognome']),
+            'mansione' => sanitize_text_field($data['mansione']),
+            'email' => isset($data['email']) ? sanitize_email($data['email']) : null,
+            'whatsapp' => isset($data['whatsapp']) ? sanitize_text_field($data['whatsapp']) : null,
+            'note' => isset($data['note']) ? sanitize_textarea_field($data['note']) : null,
+            'attivo' => isset($data['attivo']) ? intval($data['attivo']) : 1
+        );
+
+        $result = $wpdb->insert(
+            $table,
+            $collaboratore_data,
+            array('%s', '%s', '%s', '%s', '%s', '%s', '%d')
+        );
+
+        if ($result === false) {
+            return new WP_Error('db_error', __('Errore nel salvataggio del collaboratore.', 'mm-preventivi'));
+        }
+
+        return $wpdb->insert_id;
+    }
+
+    /**
+     * Aggiorna collaboratore
+     */
+    public static function update_collaboratore($id, $data) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_collaboratori;
+
+        $collaboratore_data = array(
+            'nome' => sanitize_text_field($data['nome']),
+            'cognome' => sanitize_text_field($data['cognome']),
+            'mansione' => sanitize_text_field($data['mansione']),
+            'email' => isset($data['email']) ? sanitize_email($data['email']) : null,
+            'whatsapp' => isset($data['whatsapp']) ? sanitize_text_field($data['whatsapp']) : null,
+            'note' => isset($data['note']) ? sanitize_textarea_field($data['note']) : null,
+            'attivo' => isset($data['attivo']) ? intval($data['attivo']) : 1
+        );
+
+        $result = $wpdb->update(
+            $table,
+            $collaboratore_data,
+            array('id' => $id),
+            array('%s', '%s', '%s', '%s', '%s', '%s', '%d'),
+            array('%d')
+        );
+
+        if ($result === false) {
+            return new WP_Error('db_error', __('Errore nell\'aggiornamento del collaboratore.', 'mm-preventivi'));
+        }
+
+        return true;
+    }
+
+    /**
+     * Elimina collaboratore
+     */
+    public static function delete_collaboratore($id) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_collaboratori;
+
+        $result = $wpdb->delete(
+            $table,
+            array('id' => $id),
+            array('%d')
+        );
+
+        return $result !== false;
+    }
+
+    /**
+     * Ottieni mansioni uniche dei collaboratori
+     */
+    public static function get_mansioni_collaboratori() {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_collaboratori;
+
+        return $wpdb->get_col("SELECT DISTINCT mansione FROM $table WHERE attivo = 1 ORDER BY mansione ASC");
+    }
+
+    // ===================================
+    // GESTIONE ASSEGNAZIONI COLLABORATORI
+    // ===================================
+
+    /**
+     * Ottieni assegnazioni per un preventivo
+     */
+    public static function get_assegnazioni_preventivo($preventivo_id) {
+        global $wpdb;
+
+        $table_assegnazioni = $wpdb->prefix . self::$table_assegnazioni;
+        $table_collaboratori = $wpdb->prefix . self::$table_collaboratori;
+
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT a.*, c.nome, c.cognome, c.mansione, c.email, c.whatsapp
+             FROM $table_assegnazioni a
+             JOIN $table_collaboratori c ON a.collaboratore_id = c.id
+             WHERE a.preventivo_id = %d
+             ORDER BY c.cognome ASC, c.nome ASC",
+            $preventivo_id
+        ), ARRAY_A);
+    }
+
+    /**
+     * Ottieni assegnazioni per un collaboratore
+     */
+    public static function get_assegnazioni_collaboratore($collaboratore_id) {
+        global $wpdb;
+
+        $table_assegnazioni = $wpdb->prefix . self::$table_assegnazioni;
+        $table_preventivi = $wpdb->prefix . self::$table_preventivi;
+
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT a.*, p.numero_preventivo, p.sposi, p.data_evento, p.location, p.stato as stato_preventivo
+             FROM $table_assegnazioni a
+             JOIN $table_preventivi p ON a.preventivo_id = p.id
+             WHERE a.collaboratore_id = %d
+             ORDER BY p.data_evento DESC",
+            $collaboratore_id
+        ), ARRAY_A);
+    }
+
+    /**
+     * Assegna collaboratore a preventivo
+     */
+    public static function assegna_collaboratore($preventivo_id, $collaboratore_id, $data = array()) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_assegnazioni;
+
+        // Verifica se esiste già
+        $esistente = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM $table WHERE preventivo_id = %d AND collaboratore_id = %d",
+            $preventivo_id,
+            $collaboratore_id
+        ));
+
+        if ($esistente) {
+            return new WP_Error('duplicate', __('Il collaboratore è già assegnato a questo preventivo.', 'mm-preventivi'));
+        }
+
+        $assegnazione_data = array(
+            'preventivo_id' => intval($preventivo_id),
+            'collaboratore_id' => intval($collaboratore_id),
+            'ruolo_evento' => isset($data['ruolo_evento']) ? sanitize_text_field($data['ruolo_evento']) : null,
+            'compenso' => isset($data['compenso']) ? floatval($data['compenso']) : null,
+            'note' => isset($data['note']) ? sanitize_textarea_field($data['note']) : null,
+            'notifica_inviata' => 0
+        );
+
+        $result = $wpdb->insert(
+            $table,
+            $assegnazione_data,
+            array('%d', '%d', '%s', '%f', '%s', '%d')
+        );
+
+        if ($result === false) {
+            return new WP_Error('db_error', __('Errore nell\'assegnazione del collaboratore.', 'mm-preventivi'));
+        }
+
+        return $wpdb->insert_id;
+    }
+
+    /**
+     * Aggiorna assegnazione
+     */
+    public static function update_assegnazione($id, $data) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_assegnazioni;
+
+        $update_data = array();
+        $update_format = array();
+
+        if (isset($data['ruolo_evento'])) {
+            $update_data['ruolo_evento'] = sanitize_text_field($data['ruolo_evento']);
+            $update_format[] = '%s';
+        }
+
+        if (isset($data['compenso'])) {
+            $update_data['compenso'] = floatval($data['compenso']);
+            $update_format[] = '%f';
+        }
+
+        if (isset($data['note'])) {
+            $update_data['note'] = sanitize_textarea_field($data['note']);
+            $update_format[] = '%s';
+        }
+
+        if (isset($data['notifica_inviata'])) {
+            $update_data['notifica_inviata'] = intval($data['notifica_inviata']);
+            $update_format[] = '%d';
+        }
+
+        if (isset($data['data_notifica'])) {
+            $update_data['data_notifica'] = $data['data_notifica'];
+            $update_format[] = '%s';
+        }
+
+        if (empty($update_data)) {
+            return true;
+        }
+
+        $result = $wpdb->update(
+            $table,
+            $update_data,
+            array('id' => $id),
+            $update_format,
+            array('%d')
+        );
+
+        if ($result === false) {
+            return new WP_Error('db_error', __('Errore nell\'aggiornamento dell\'assegnazione.', 'mm-preventivi'));
+        }
+
+        return true;
+    }
+
+    /**
+     * Rimuovi assegnazione collaboratore da preventivo
+     */
+    public static function rimuovi_assegnazione($id) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_assegnazioni;
+
+        $result = $wpdb->delete(
+            $table,
+            array('id' => $id),
+            array('%d')
+        );
+
+        return $result !== false;
+    }
+
+    /**
+     * Rimuovi tutte le assegnazioni di un collaboratore da un preventivo
+     */
+    public static function rimuovi_assegnazione_by_ids($preventivo_id, $collaboratore_id) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_assegnazioni;
+
+        $result = $wpdb->delete(
+            $table,
+            array(
+                'preventivo_id' => $preventivo_id,
+                'collaboratore_id' => $collaboratore_id
+            ),
+            array('%d', '%d')
+        );
+
+        return $result !== false;
+    }
+
+    /**
+     * Ottieni preventivi con assegnazioni collaboratori
+     */
+    public static function get_preventivi_con_assegnazioni($filters = array()) {
+        global $wpdb;
+
+        $table_preventivi = $wpdb->prefix . self::$table_preventivi;
+        $table_assegnazioni = $wpdb->prefix . self::$table_assegnazioni;
+        $table_collaboratori = $wpdb->prefix . self::$table_collaboratori;
+        $table_tipi_evento = $wpdb->prefix . self::$table_tipi_evento;
+
+        $where = array('1=1');
+        $where_values = array();
+
+        // Filtri
+        if (isset($filters['stato']) && !empty($filters['stato'])) {
+            $where[] = 'p.stato = %s';
+            $where_values[] = $filters['stato'];
+        }
+
+        if (isset($filters['data_da']) && !empty($filters['data_da'])) {
+            $where[] = 'p.data_evento >= %s';
+            $where_values[] = $filters['data_da'];
+        }
+
+        if (isset($filters['data_a']) && !empty($filters['data_a'])) {
+            $where[] = 'p.data_evento <= %s';
+            $where_values[] = $filters['data_a'];
+        }
+
+        if (isset($filters['search']) && !empty($filters['search'])) {
+            $where[] = '(p.sposi LIKE %s OR p.numero_preventivo LIKE %s OR p.location LIKE %s)';
+            $search_term = '%' . $wpdb->esc_like($filters['search']) . '%';
+            $where_values[] = $search_term;
+            $where_values[] = $search_term;
+            $where_values[] = $search_term;
+        }
+
+        // Solo eventi futuri di default
+        if (!isset($filters['mostra_passati']) || !$filters['mostra_passati']) {
+            $where[] = 'p.data_evento >= CURDATE()';
+        }
+
+        // Filtro per collaboratore specifico
+        $join_collaboratore = '';
+        $join_collaboratore_value = null;
+        if (isset($filters['collaboratore_id']) && !empty($filters['collaboratore_id'])) {
+            $join_collaboratore = "INNER JOIN $table_assegnazioni af ON p.id = af.preventivo_id AND af.collaboratore_id = %d";
+            $join_collaboratore_value = intval($filters['collaboratore_id']);
+        }
+
+        $where_clause = implode(' AND ', $where);
+
+        // Paginazione
+        $per_page = isset($filters['per_page']) ? intval($filters['per_page']) : 20;
+        $page = isset($filters['page']) ? intval($filters['page']) : 1;
+        $offset = ($page - 1) * $per_page;
+
+        $query = "SELECT DISTINCT p.id, p.numero_preventivo, p.sposi, p.data_evento, p.location,
+                         p.tipo_evento, p.stato, p.totale,
+                         te.nome as categoria_nome, te.icona as categoria_icona,
+                         (SELECT GROUP_CONCAT(
+                             CONCAT(c.nome, ' ', c.cognome, ' (', c.mansione, ')')
+                             ORDER BY c.cognome SEPARATOR ', '
+                         )
+                         FROM $table_assegnazioni a
+                         JOIN $table_collaboratori c ON a.collaboratore_id = c.id
+                         WHERE a.preventivo_id = p.id) as collaboratori_assegnati,
+                         (SELECT COUNT(*) FROM $table_assegnazioni WHERE preventivo_id = p.id) as num_collaboratori
+                  FROM $table_preventivi p
+                  LEFT JOIN $table_tipi_evento te ON p.categoria_id = te.id
+                  $join_collaboratore
+                  WHERE $where_clause
+                  ORDER BY p.data_evento ASC
+                  LIMIT %d OFFSET %d";
+
+        // Aggiungi il valore del join collaboratore se presente
+        if ($join_collaboratore_value !== null) {
+            array_unshift($where_values, $join_collaboratore_value);
+        }
+
+        $where_values[] = $per_page;
+        $where_values[] = $offset;
+
+        if (!empty($where_values)) {
+            $query = $wpdb->prepare($query, $where_values);
+        }
+
+        return $wpdb->get_results($query, ARRAY_A);
+    }
+
+    /**
+     * Conta preventivi con filtri (per paginazione)
+     */
+    public static function count_preventivi_con_assegnazioni($filters = array()) {
+        global $wpdb;
+
+        $table_preventivi = $wpdb->prefix . self::$table_preventivi;
+        $table_assegnazioni = $wpdb->prefix . self::$table_assegnazioni;
+
+        $where = array('1=1');
+        $where_values = array();
+
+        // Filtro per collaboratore specifico
+        $join_collaboratore = '';
+        if (isset($filters['collaboratore_id']) && !empty($filters['collaboratore_id'])) {
+            $join_collaboratore = "INNER JOIN $table_assegnazioni af ON p.id = af.preventivo_id AND af.collaboratore_id = %d";
+            array_unshift($where_values, intval($filters['collaboratore_id']));
+        }
+
+        if (isset($filters['stato']) && !empty($filters['stato'])) {
+            $where[] = 'p.stato = %s';
+            $where_values[] = $filters['stato'];
+        }
+
+        if (isset($filters['data_da']) && !empty($filters['data_da'])) {
+            $where[] = 'p.data_evento >= %s';
+            $where_values[] = $filters['data_da'];
+        }
+
+        if (isset($filters['data_a']) && !empty($filters['data_a'])) {
+            $where[] = 'p.data_evento <= %s';
+            $where_values[] = $filters['data_a'];
+        }
+
+        if (isset($filters['search']) && !empty($filters['search'])) {
+            $where[] = '(p.sposi LIKE %s OR p.numero_preventivo LIKE %s OR p.location LIKE %s)';
+            $search_term = '%' . $wpdb->esc_like($filters['search']) . '%';
+            $where_values[] = $search_term;
+            $where_values[] = $search_term;
+            $where_values[] = $search_term;
+        }
+
+        if (!isset($filters['mostra_passati']) || !$filters['mostra_passati']) {
+            $where[] = 'p.data_evento >= CURDATE()';
+        }
+
+        $where_clause = implode(' AND ', $where);
+        $query = "SELECT COUNT(DISTINCT p.id) FROM $table_preventivi p $join_collaboratore WHERE $where_clause";
+
+        if (!empty($where_values)) {
+            $query = $wpdb->prepare($query, $where_values);
+        }
+
+        return intval($wpdb->get_var($query));
+    }
+
+    /**
+     * Segna notifica inviata per assegnazione
+     */
+    public static function segna_notifica_inviata($assegnazione_id) {
+        global $wpdb;
+
+        $table = $wpdb->prefix . self::$table_assegnazioni;
+
+        return $wpdb->update(
+            $table,
+            array(
+                'notifica_inviata' => 1,
+                'data_notifica' => current_time('mysql')
+            ),
+            array('id' => $assegnazione_id),
+            array('%d', '%s'),
+            array('%d')
+        );
     }
 }

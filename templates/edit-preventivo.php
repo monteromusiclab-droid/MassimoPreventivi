@@ -137,6 +137,9 @@ $categorie = MM_Database::get_tipi_evento(true);
             <a href="<?php echo home_url('/lista-preventivi/'); ?>" class="mm-nav-btn">
                 📊 Tutti i Preventivi
             </a>
+            <a href="<?php echo home_url('/assegnazioni-collaboratori/'); ?>" class="mm-nav-btn">
+                🎵 Assegnazioni
+            </a>
             <a href="<?php echo home_url('/statistiche-preventivi/'); ?>" class="mm-nav-btn">
                 📈 Statistiche
             </a>
@@ -272,9 +275,9 @@ $categorie = MM_Database::get_tipi_evento(true);
                     </div>
                 </div>
                 <?php
-                // Cerca il prezzo del rito nei servizi
+                // Cerca il prezzo del rito nei servizi COMPLETI (non in quelli filtrati)
                 $prezzo_rito = 0;
-                foreach ($servizi_db as $serv) {
+                foreach ($servizi_db_completi as $serv) {
                     // Cerca servizi che iniziano con "Rito"
                     if (strpos($serv['nome_servizio'], 'Rito') === 0) {
                         $prezzo_rito = floatval($serv['prezzo']);
@@ -296,7 +299,7 @@ $categorie = MM_Database::get_tipi_evento(true);
                 <h2 class="mm-section-title">✨ Servizi Extra</h2>
                 <div class="mm-checkbox-group" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 15px;">
                     <?php
-                    $extras_disponibili = array('Accoglienza', 'Antipasti', 'Aperitivo', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Open Bar', 'Torta', 'Confettata', 'Bomboniere');
+                    $extras_disponibili = array('Rito', 'Accoglienza', 'Antipasti', 'Sala', 'Torta', 'Buffet f/d', 'After Party');
                     foreach ($extras_disponibili as $extra) :
                         $is_checked = is_array($servizi_extra_db) && in_array($extra, $servizi_extra_db);
                     ?>

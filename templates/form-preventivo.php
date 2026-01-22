@@ -35,6 +35,9 @@ $categorie = MM_Database::get_tipi_evento(true);
             <a href="<?php echo home_url('/lista-preventivi/'); ?>" class="mm-nav-btn">
                 📊 Tutti i Preventivi
             </a>
+            <a href="<?php echo home_url('/assegnazioni-collaboratori/'); ?>" class="mm-nav-btn">
+                🎵 Assegnazioni
+            </a>
             <a href="<?php echo home_url('/statistiche-preventivi/'); ?>" class="mm-nav-btn">
                 📈 Statistiche
             </a>
@@ -228,8 +231,8 @@ $categorie = MM_Database::get_tipi_evento(true);
                 <h2 class="mm-section-title">✨ Servizi</h2>
                 <div class="mm-checkbox-group">
                     <?php
-                    $extras = array('Accoglienza', 'Antipasti', 'Sala', 'Torta', 'Buffet f/d', 'After Party');
-                    $extras_checked = array('Accoglienza', 'Antipasti', 'Sala', 'Torta', 'Buffet f/d'); // Default checked
+                    $extras = array('Rito', 'Accoglienza', 'Antipasti', 'Sala', 'Torta', 'Buffet f/d', 'After Party');
+                    $extras_checked = array('Accoglienza', 'Antipasti', 'Sala', 'Torta', 'Buffet f/d'); // Default checked (Rito non selezionato)
                     foreach ($extras as $extra) :
                         $is_checked = in_array($extra, $extras_checked) ? 'checked' : '';
                     ?>

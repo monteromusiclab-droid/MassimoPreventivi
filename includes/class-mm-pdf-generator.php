@@ -96,9 +96,587 @@ class MM_PDF_Generator {
 
     /**
      * Genera HTML per PDF identico alla versione stampata
-     * Replica esatto layout dell'anteprima HTML ma con CSS compatibile DOMPDF
+     * Replica esatto layout dell'anteprima HTML con stili @media print applicati
+     * e conversione flex/grid in tabelle per compatibilità DOMPDF
      */
     private static function generate_pdf_html_content($preventivo) {
+        // Impostazioni aziendali
+        $company_name = get_option('mm_preventivi_company_name', 'MONTERO MUSIC di Massimo Manca');
+        $company_address = get_option('mm_preventivi_company_address', 'Via Ofanto, 37 73047 Monteroni di Lecce (LE)');
+        $company_phone = get_option('mm_preventivi_company_phone', '333-7512343');
+        $company_email = get_option('mm_preventivi_company_email', 'info@massimomanca.it');
+        $company_piva = get_option('mm_preventivi_company_piva', 'P.I. 04867450753');
+        $company_cf = get_option('mm_preventivi_company_cf', 'C.F. MNCMSM79E01119H');
+        $company_logo = get_option('mm_preventivi_logo', '');
+
+        // Variabili categoria e stato
+        $categoria_nome = !empty($preventivo['categoria_nome']) ? strtolower($preventivo['categoria_nome']) : '';
+        $label_cliente = ($categoria_nome === 'matrimonio') ? 'Sposi' : 'Cliente';
+        $stato = !empty($preventivo['stato']) ? $preventivo['stato'] : 'attivo';
+        $stato_label = ucfirst($stato);
+        $categoria_display = !empty($preventivo['categoria_nome']) ? $preventivo['categoria_nome'] : 'Non specificato';
+        $categoria_icona = !empty($preventivo['categoria_icona']) ? $preventivo['categoria_icona'] : '';
+
+        // Colori stato
+        $stato_colors = array(
+            'bozza' => '#ff9800',
+            'attivo' => '#4caf50',
+            'inviato' => '#2196f3',
+            'accettato' => '#8bc34a',
+            'rifiutato' => '#f44336',
+            'archiviato' => '#9e9e9e'
+        );
+        $stato_color = isset($stato_colors[$stato]) ? $stato_colors[$stato] : '#4caf50';
+
+        // Calcoli finanziari (identici a generate_html_pdf)
+        $totale_servizi = floatval($preventivo['totale_servizi']);
+        $sconto = isset($preventivo['sconto']) ? floatval($preventivo['sconto']) : 0;
+        $sconto_percentuale = isset($preventivo['sconto_percentuale']) ? floatval($preventivo['sconto_percentuale']) : 0;
+        $importo_sconto = 0;
+        if ($sconto_percentuale > 0) {
+            $importo_sconto = $totale_servizi * ($sconto_percentuale / 100);
+        } elseif ($sconto > 0) {
+            $importo_sconto = $sconto;
+        }
+        $totale_dopo_sconto = $totale_servizi - $importo_sconto;
+
+        $applica_enpals = isset($preventivo['applica_enpals']) && $preventivo['applica_enpals'] == 1;
+        $applica_iva = isset($preventivo['applica_iva']) && $preventivo['applica_iva'] == 1;
+
+        $enpals_committente_percentage = floatval(get_option('mm_preventivi_enpals_committente_percentage', 23.81));
+        $enpals_lavoratore_percentage = floatval(get_option('mm_preventivi_enpals_lavoratore_percentage', 9.19));
+        $iva_percentage = floatval(get_option('mm_preventivi_iva_percentage', 22));
+
+        $enpals_committente = $applica_enpals ? ($totale_dopo_sconto * ($enpals_committente_percentage / 100)) : 0;
+        $enpals_lavoratore = $applica_enpals ? ($totale_dopo_sconto * ($enpals_lavoratore_percentage / 100)) : 0;
+        $imponibile_iva = $totale_dopo_sconto + $enpals_committente;
+        $iva = $applica_iva ? ($imponibile_iva * ($iva_percentage / 100)) : 0;
+        $totale = $imponibile_iva + $iva;
+
+        // Evidenzia totale servizi se non ci sono sconti
+        $evidenzia_totale_servizi = ($importo_sconto == 0);
+        $style_totale_servizi = $evidenzia_totale_servizi ? 'background-color: #fff9c4;' : '';
+
+        // HTML con stili di stampa applicati direttamente (no flex/grid per DOMPDF)
+        $html = '<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Preventivo ' . esc_html($preventivo['numero_preventivo']) . '</title>
+    <style>
+        @page { margin: 0; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: DejaVu Sans, Arial, sans-serif;
+            font-size: 10px;
+            line-height: 1.4;
+            color: #333;
+            background: white;
+            padding: 20mm;
+        }
+        .container {
+            width: 100%;
+            padding: 0;
+        }
+
+        /* Header con tabella invece di flex */
+        .header {
+            border-bottom: 4px solid #e91e63;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .header-table { width: 100%; border-collapse: collapse; }
+        .header-table td { vertical-align: top; border: none; }
+        .logo { max-height: 80px; }
+        .company-name { color: #e91e63; font-size: 20px; font-weight: bold; }
+        .subtitle { color: #666; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
+        .preventivo-title { color: #e91e63; font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+        .preventivo-numero { color: #666; font-size: 13px; }
+
+        /* Tipo evento e stato con tabella */
+        .tipo-stato-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0 10px 0;
+        }
+        .tipo-evento-cell {
+            background-color: #e91e63;
+            color: white;
+            padding: 8px 15px;
+            font-weight: 600;
+            font-size: 11px;
+        }
+        .stato-cell {
+            background-color: ' . $stato_color . ';
+            color: white;
+            padding: 8px 15px;
+            font-weight: 600;
+            font-size: 11px;
+            text-align: center;
+            width: 200px;
+        }
+
+        /* Info grid con tabella invece di grid */
+        .info-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 15px 0;
+            margin: 15px 0;
+        }
+        .info-table td { width: 50%; vertical-align: top; padding: 0; }
+        .info-box {
+            background: #f8f8f8;
+            padding: 15px;
+            border: 2px solid #e91e63;
+        }
+        .info-box-title {
+            color: #e91e63;
+            font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e91e63;
+        }
+        .info-row { margin: 6px 0; font-size: 12px; line-height: 1.5; }
+
+        /* Rito box */
+        .rito-box {
+            margin: 10px 0 15px 0;
+            padding: 8px 12px;
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+        }
+        .rito-label { font-size: 10px; color: #e65100; font-weight: 700; }
+        .rito-value { font-size: 11px; color: #bf360c; font-weight: 600; margin-left: 8px; }
+
+        /* Servizi extra */
+        .extra-box {
+            margin: 15px 0;
+            padding: 12px 15px;
+            background: #f5f5f5;
+            border-left: 4px solid #9c27b0;
+        }
+        .extra-tag {
+            display: inline-block;
+            margin: 4px 6px;
+            padding: 5px 10px;
+            background: #ffffff;
+            border: 1px solid #d0d0d0;
+            font-size: 10px;
+            font-weight: 500;
+            color: #424242;
+        }
+        .checkbox-icon {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background: #9c27b0;
+            color: white;
+            text-align: center;
+            line-height: 12px;
+            font-size: 9px;
+            margin-right: 5px;
+        }
+
+        /* Titoli sezione */
+        h2 {
+            color: #e91e63;
+            font-size: 14px;
+            margin: 20px 0 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #f8bbd0;
+        }
+
+        /* Tabelle */
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+        th, td { padding: 10px; text-align: left; border: 1px solid #ddd; }
+        th { background: #e91e63; color: white; font-weight: bold; font-size: 11px; }
+        td:last-child { text-align: right; }
+
+        /* Two column layout con tabella */
+        .two-col-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 15px 0;
+            margin: 20px 0;
+        }
+        .two-col-table > tbody > tr > td { width: 50%; vertical-align: top; padding: 0; }
+        .column-box {
+            background: #fafafa;
+            padding: 15px;
+            border: 2px solid #e91e63;
+        }
+        .column-box h3 {
+            margin: 0 0 10px 0;
+            color: #e91e63;
+            font-size: 13px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #f8bbd0;
+        }
+
+        /* Tabella totali interna */
+        .totali-table { width: 100%; border-collapse: collapse; }
+        .totali-table td { border: none; padding: 5px 0; font-size: 11px; }
+        .totali-table .right { text-align: right; font-weight: bold; }
+        .totali-table .sconto { color: #4caf50; }
+        .totali-table .highlight { background-color: #fff9c4; }
+        .totali-table .enpals-detail { font-size: 9px; color: #666; background-color: #fffaf0; }
+        .totali-table .total-row { border-top: 3px solid #e91e63; background: #f8bbd0; }
+        .totali-table .total-row td { padding: 10px 0; font-size: 15px; font-weight: bold; color: #e91e63; }
+
+        /* Validità */
+        .validita-box {
+            font-size: 10px;
+            color: #666;
+            font-style: italic;
+            margin: 12px 0;
+            padding: 8px 12px;
+            background: #fffaf0;
+            border-left: 3px solid #ff9800;
+        }
+
+        /* Acconti */
+        .acconto {
+            background: #e8f5e9;
+            padding: 12px 15px;
+            border-left: 4px solid #4caf50;
+            margin: 15px 0;
+            font-size: 11px;
+        }
+        .acconto p { margin: 4px 0; }
+
+        /* Altri servizi */
+        .altri-servizi-box {
+            background: #f8f8f8;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            margin-top: 10px;
+        }
+        .altri-servizi-note {
+            margin: 10px 0 0 0;
+            font-size: 9px;
+            color: #999;
+            font-style: italic;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 25px;
+            padding-top: 15px;
+            border-top: 2px solid #e91e63;
+            text-align: center;
+            font-size: 9px;
+            color: #666;
+        }
+        .footer strong { color: #e91e63; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <!-- Header (tabella invece di flex) -->
+    <div class="header">
+        <table class="header-table">
+            <tr>
+                <td style="width: 60%;">';
+
+        if (!empty($company_logo)) {
+            $html .= '<img src="' . esc_url($company_logo) . '" class="logo"><br>';
+        }
+
+        $html .= '<div class="company-name">' . esc_html($company_name) . '</div>
+                    <p class="subtitle">DJ - Animazione - Scenografie - Photo Booth</p>
+                </td>
+                <td style="width: 40%; text-align: right;">
+                    <div class="preventivo-title">PREVENTIVO</div>
+                    <div class="preventivo-numero">N. ' . esc_html($preventivo['numero_preventivo']) . '</div>
+                    <div class="preventivo-numero" style="margin-top: 5px;">del ' . date('d/m/Y', strtotime($preventivo['data_preventivo'])) . '</div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- Tipo Evento e Stato (tabella invece di flex) -->
+    <table class="tipo-stato-table">
+        <tr>
+            <td class="tipo-evento-cell">TIPO DI EVENTO RICHIESTO: ' . esc_html($categoria_icona) . ' ' . strtoupper(esc_html($categoria_display)) . '</td>
+            <td class="stato-cell">STATO: ' . strtoupper(esc_html($stato_label)) . '</td>
+        </tr>
+    </table>
+
+    <!-- Info Grid (tabella invece di grid) -->
+    <table class="info-table">
+        <tr>
+            <td>
+                <div class="info-box">
+                    <div class="info-box-title">' . esc_html($label_cliente) . '</div>
+                    <div class="info-row"><strong style="font-size: 16px;">' . esc_html($preventivo['sposi']) . '</strong></div>
+                    <div class="info-row">' . esc_html($preventivo['email']) . '</div>
+                    <div class="info-row">' . esc_html($preventivo['telefono']) . '</div>
+                </div>
+            </td>
+            <td>
+                <div class="info-box">
+                    <div class="info-box-title">Dettagli Evento</div>
+                    <div class="info-row"><strong style="font-size: 16px;">' . date('d/m/Y', strtotime($preventivo['data_evento'])) . '</strong></div>
+                    <div class="info-row">' . esc_html($preventivo['tipo_evento']) . '</div>
+                    <div class="info-row">' . esc_html($preventivo['location']) . '</div>
+                </div>
+            </td>
+        </tr>
+    </table>';
+
+        // Rito/Cerimonia
+        $cerimonia_array = !empty($preventivo['cerimonia']) ? (is_array($preventivo['cerimonia']) ? $preventivo['cerimonia'] : explode(',', $preventivo['cerimonia'])) : array();
+        if (!empty($cerimonia_array)) {
+            $cerimonia_items = array();
+            foreach ($cerimonia_array as $item) {
+                $item = trim($item);
+                if (!empty($item)) {
+                    $cerimonia_items[] = esc_html($item);
+                }
+            }
+            if (!empty($cerimonia_items)) {
+                $html .= '<div class="rito-box">
+                    <span class="rito-label">RITO:</span>
+                    <span class="rito-value">' . implode(' - ', $cerimonia_items) . '</span>
+                </div>';
+            }
+        }
+
+        // Servizi Extra
+        $extra_array = !empty($preventivo['servizi_extra']) ? (is_array($preventivo['servizi_extra']) ? $preventivo['servizi_extra'] : explode(',', $preventivo['servizi_extra'])) : array();
+        if (!empty($extra_array)) {
+            $html .= '<div class="extra-box">';
+            foreach ($extra_array as $item) {
+                $item = trim($item);
+                if (!empty($item)) {
+                    $html .= '<span class="extra-tag"><span class="checkbox-icon">&#10003;</span>' . esc_html($item) . '</span>';
+                }
+            }
+            $html .= '</div>';
+        }
+
+        // Verifica sconti servizi
+        $ha_sconti = false;
+        foreach ($preventivo['servizi'] as $servizio) {
+            if (isset($servizio['sconto']) && floatval($servizio['sconto']) > 0) {
+                $ha_sconti = true;
+                break;
+            }
+        }
+
+        // Tabella Servizi
+        $html .= '<h2>Dettaglio Prezzi</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th style="text-align: left;">Servizio</th>
+                    <th style="width: 90px; text-align: right;">Prezzo</th>';
+        if ($ha_sconti) {
+            $html .= '<th style="width: 90px; text-align: right;">Sconto</th>';
+        }
+        $html .= '<th style="width: 90px; text-align: right;">Totale</th>
+                </tr>
+            </thead>
+            <tbody>';
+
+        foreach ($preventivo['servizi'] as $servizio) {
+            $prezzo = floatval($servizio['prezzo']);
+            $sconto_serv = isset($servizio['sconto']) ? floatval($servizio['sconto']) : 0;
+            $totale_serv = $prezzo - $sconto_serv;
+
+            $html .= '<tr>
+                <td style="text-align: left;">' . esc_html($servizio['nome_servizio']) . '</td>
+                <td style="text-align: right;">' . ($prezzo > 0 ? '&euro; ' . number_format($prezzo, 2, ',', '.') : '<span style="color: #999;">Incluso</span>') . '</td>';
+            if ($ha_sconti) {
+                $html .= '<td style="text-align: right;">' . ($sconto_serv > 0 ? '<span style="color: #4caf50; font-weight: bold;">-&euro; ' . number_format($sconto_serv, 2, ',', '.') . '</span>' : '—') . '</td>';
+            }
+            $html .= '<td style="text-align: right; font-weight: ' . ($prezzo > 0 ? 'bold' : 'normal') . ';">' . ($prezzo > 0 ? '&euro; ' . number_format($totale_serv, 2, ',', '.') : '—') . '</td>
+            </tr>';
+        }
+        $html .= '</tbody></table>';
+
+        // Layout a due colonne: Note (sinistra) e Totali (destra)
+        $html .= '<table class="two-col-table">
+            <tbody>
+            <tr>
+                <td>
+                    <div class="column-box">
+                        <h3>Note</h3>';
+
+        if (!empty($preventivo['note'])) {
+            $html .= '<div style="line-height: 1.6; font-size: 11px;">' . nl2br(esc_html($preventivo['note'])) . '</div>';
+        } else {
+            $html .= '<p style="color: #999; font-style: italic; font-size: 11px;">Nessuna nota aggiuntiva</p>';
+        }
+
+        $html .= '</div>
+                </td>
+                <td>
+                    <div class="column-box">
+                        <h3>Riepilogo Importi</h3>
+                        <table class="totali-table">
+                            <tr' . ($evidenzia_totale_servizi ? ' class="highlight"' : '') . '>
+                                <td><strong>Totale Servizi</strong></td>
+                                <td class="right">&euro; ' . number_format($totale_servizi, 2, ',', '.') . '</td>
+                            </tr>';
+
+        if ($importo_sconto > 0) {
+            $sconto_label = 'Sconto';
+            if ($sconto_percentuale > 0) {
+                $sconto_label .= ' (' . number_format($sconto_percentuale, 0) . '%)';
+            }
+            $html .= '<tr class="sconto">
+                <td>- ' . $sconto_label . '</td>
+                <td class="right">&euro; ' . number_format($importo_sconto, 2, ',', '.') . '</td>
+            </tr>
+            <tr class="highlight">
+                <td><strong>Subtotale</strong></td>
+                <td class="right">&euro; ' . number_format($totale_dopo_sconto, 2, ',', '.') . '</td>
+            </tr>';
+        }
+
+        // ENPALS
+        if ($applica_enpals) {
+            $enpals_33_percent = $totale_dopo_sconto * 0.33;
+            $enpals_netto = $enpals_33_percent - $enpals_lavoratore;
+
+            $html .= '<tr>
+                <td>Ex Enpals 33%</td>
+                <td class="right">&euro; ' . number_format($enpals_33_percent, 2, ',', '.') . '</td>
+            </tr>
+            <tr class="enpals-detail">
+                <td>- Ex Enpals Lavoratore ' . number_format($enpals_lavoratore_percentage, 2) . '%</td>
+                <td class="right">- &euro; ' . number_format($enpals_lavoratore, 2, ',', '.') . '</td>
+            </tr>
+            <tr>
+                <td><strong>Totale Ex Enpals</strong></td>
+                <td class="right">&euro; ' . number_format($enpals_netto, 2, ',', '.') . '</td>
+            </tr>';
+        }
+
+        // IVA
+        $html .= '<tr>
+            <td>IVA (' . number_format($iva_percentage, 1) . '%)</td>
+            <td class="right">&euro; ' . number_format($iva, 2, ',', '.') . '</td>
+        </tr>
+        <tr class="total-row">
+            <td><strong>TOTALE</strong></td>
+            <td class="right"><strong>&euro; ' . number_format($totale, 2, ',', '.') . '</strong></td>
+        </tr>
+                        </table>
+                    </div>
+                </td>
+            </tr>
+            </tbody>
+        </table>';
+
+        // Validità preventivo
+        if ($stato !== 'accettato' && $stato !== 'confermato') {
+            $html .= '<div class="validita-box">
+                Il presente preventivo è valido 14 giorni dalla data indicata
+            </div>';
+        }
+
+        // Acconti
+        $acconti = isset($preventivo['acconti']) && is_array($preventivo['acconti']) ? $preventivo['acconti'] : array();
+        if (empty($acconti) && !empty($preventivo['data_acconto']) && !empty($preventivo['importo_acconto']) && floatval($preventivo['importo_acconto']) > 0) {
+            $acconti = array(array(
+                'data_acconto' => $preventivo['data_acconto'],
+                'importo_acconto' => $preventivo['importo_acconto']
+            ));
+        }
+
+        if (!empty($acconti)) {
+            $html .= '<div class="acconto">';
+            $totale_acconti = 0;
+            foreach ($acconti as $acconto) {
+                $importo_acc = floatval($acconto['importo_acconto']);
+                $totale_acconti += $importo_acc;
+                $html .= '<p><strong>Acconto del ' . date('d/m/Y', strtotime($acconto['data_acconto'])) . ':</strong> &euro; ' . number_format($importo_acc, 2, ',', '.') . '</p>';
+            }
+            if (count($acconti) > 1) {
+                $html .= '<p style="margin-top: 8px; padding-top: 8px; border-top: 2px solid #4caf50;"><strong>Totale Acconti:</strong> &euro; ' . number_format($totale_acconti, 2, ',', '.') . '</p>';
+            }
+            $restante = $totale - $totale_acconti;
+            $html .= '<p><strong>Restante da saldare:</strong> &euro; ' . number_format($restante, 2, ',', '.') . '</p>
+            </div>';
+        }
+
+        // Altri Servizi Disponibili
+        $servizi_catalogo = MM_Database::get_catalogo_servizi();
+        $servizi_selezionati_nomi = array_map(function($s) {
+            return strtolower(trim($s['nome_servizio']));
+        }, $preventivo['servizi']);
+
+        $servizi_disponibili = array_filter($servizi_catalogo, function($servizio) use ($servizi_selezionati_nomi) {
+            return $servizio['attivo'] == 1 &&
+                   !in_array(strtolower(trim($servizio['nome_servizio'])), $servizi_selezionati_nomi);
+        });
+
+        if (!empty($servizi_disponibili)) {
+            $html .= '<h2>Altri Servizi Disponibili</h2>
+            <div class="altri-servizi-box">
+                <table style="margin: 0;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left;">Servizio</th>
+                            <th style="width: 130px; text-align: left;">Categoria</th>
+                            <th style="width: 100px; text-align: right;">Prezzo</th>
+                        </tr>
+                    </thead>
+                    <tbody>';
+
+            usort($servizi_disponibili, function($a, $b) {
+                if ($a['categoria'] == $b['categoria']) {
+                    return $a['ordinamento'] - $b['ordinamento'];
+                }
+                return strcmp($a['categoria'], $b['categoria']);
+            });
+
+            foreach ($servizi_disponibili as $servizio) {
+                $prezzo_display = $servizio['prezzo_default'] > 0
+                    ? '&euro; ' . number_format($servizio['prezzo_default'], 2, ',', '.')
+                    : '<span style="color: #999;">Su richiesta</span>';
+
+                $html .= '<tr>
+                    <td style="text-align: left;">' . esc_html($servizio['nome_servizio']);
+                if (!empty($servizio['descrizione'])) {
+                    $html .= '<br><small style="color: #666; font-size: 9px;">' . esc_html($servizio['descrizione']) . '</small>';
+                }
+                $html .= '</td>
+                    <td style="text-align: left; color: #666;">' . esc_html($servizio['categoria'] ?: '—') . '</td>
+                    <td style="text-align: right; font-weight: 600; color: #e91e63;">' . $prezzo_display . '</td>
+                </tr>';
+            }
+
+            $html .= '</tbody>
+                </table>
+                <p class="altri-servizi-note">I servizi sopra elencati sono disponibili su richiesta. Contattaci per maggiori informazioni.</p>
+            </div>';
+        }
+
+        // Footer
+        $html .= '<div class="footer">
+            <strong>' . esc_html($company_name) . '</strong><br>
+            ' . esc_html($company_address) . '<br>
+            ' . esc_html($company_piva) . ' - ' . esc_html($company_cf) . '<br>
+            Tel. ' . esc_html($company_phone) . ' - Email: ' . esc_html($company_email) . '
+        </div>
+
+</div>
+</body>
+</html>';
+
+        return $html;
+    }
+
+    /**
+     * Funzione DEPRECATA - mantenuta per retrocompatibilità
+     * Genera HTML per PDF identico alla versione stampata
+     */
+    private static function generate_pdf_html_content_OLD($preventivo) {
         // Impostazioni aziendali
         $company_name = get_option('mm_preventivi_company_name', 'MONTERO MUSIC di Massimo Manca');
         $company_address = get_option('mm_preventivi_company_address', 'Via Ofanto, 37 73047 Monteroni di Lecce (LE)');
@@ -158,193 +736,369 @@ class MM_PDF_Generator {
     <meta charset="UTF-8">
     <title>Preventivo ' . esc_html($preventivo['numero_preventivo']) . '</title>
     <style>
-        @page { margin: 12mm 15mm; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @page {
+            margin: 12mm 15mm 15mm 15mm;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
             font-family: DejaVu Sans, Arial, sans-serif;
-            font-size: 11px;
-            line-height: 1.5;
+            font-size: 10pt;
+            line-height: 1.4;
             color: #333;
             background: white;
         }
-
-        /* Header */
-        .header {
-            border-bottom: 4px solid #e91e63;
-            padding-bottom: 10px;
-            margin-bottom: 15px;
+        .container {
+            width: 100%;
+            padding: 0;
         }
-        .header-table { width: 100%; border-collapse: collapse; }
-        .header-table td { vertical-align: middle; border: none; padding: 0; }
-        .logo { max-height: 70px; }
-        .company-name { color: #e91e63; font-size: 20px; font-weight: bold; }
-        .subtitle { font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-top: 3px; }
-        .preventivo-title { color: #e91e63; font-size: 16px; font-weight: bold; margin-bottom: 3px; }
-        .preventivo-numero { color: #666; font-size: 12px; }
 
-        /* Tipo Evento e Stato */
-        .tipo-stato-table { width: 100%; border-collapse: collapse; margin: 15px 0 10px 0; }
+        /* ========== HEADER ========== */
+        .header {
+            border-bottom: 3px solid #e91e63;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .header-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .header-table td {
+            vertical-align: top;
+            border: none;
+            padding: 0;
+        }
+        .logo {
+            max-height: 60px;
+            max-width: 180px;
+        }
+        .company-name {
+            color: #e91e63;
+            font-size: 18pt;
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+        .company-subtitle {
+            font-size: 8pt;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .preventivo-box {
+            text-align: right;
+        }
+        .preventivo-title {
+            color: #e91e63;
+            font-size: 16pt;
+            font-weight: bold;
+        }
+        .preventivo-numero {
+            color: #555;
+            font-size: 11pt;
+            margin-top: 3px;
+        }
+
+        /* ========== TIPO EVENTO E STATO ========== */
+        .tipo-stato-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
         .tipo-evento-cell {
             background-color: #e91e63;
             color: white;
-            padding: 6px 15px;
-            font-weight: 600;
-            font-size: 11px;
+            padding: 8px 15px;
+            font-weight: bold;
+            font-size: 10pt;
         }
         .stato-cell {
             background-color: ' . $stato_color . ';
             color: white;
-            padding: 6px 15px;
-            font-weight: 600;
-            font-size: 11px;
+            padding: 8px 15px;
+            font-weight: bold;
+            font-size: 10pt;
             text-align: center;
-            width: 150px;
+            width: 180px;
         }
 
-        /* Info Grid */
-        .info-table { width: 100%; border-collapse: separate; border-spacing: 15px 0; margin: 15px 0; }
-        .info-table td { width: 50%; vertical-align: top; padding: 0; }
+        /* ========== INFO BOXES ========== */
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .info-table > tbody > tr > td {
+            width: 50%;
+            vertical-align: top;
+            padding: 0 8px 0 0;
+        }
+        .info-table > tbody > tr > td:last-child {
+            padding: 0 0 0 8px;
+        }
         .info-box {
-            background-color: #f8f8f8;
-            padding: 12px;
+            background-color: #fafafa;
+            padding: 15px;
             border: 2px solid #e91e63;
+            border-radius: 4px;
+            height: 100%;
         }
         .info-box-title {
             color: #e91e63;
             font-weight: bold;
-            font-size: 11px;
-            margin-bottom: 8px;
-            padding-bottom: 6px;
-            border-bottom: 1px solid #e91e63;
+            font-size: 11pt;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f8bbd0;
         }
-        .info-row { margin: 5px 0; font-size: 12px; }
-        .info-row-main { font-size: 16px; font-weight: bold; margin: 5px 0; }
+        .info-row {
+            margin: 6px 0;
+            font-size: 10pt;
+            line-height: 1.5;
+        }
+        .info-row-main {
+            font-size: 13pt;
+            font-weight: bold;
+            color: #333;
+            margin: 8px 0;
+        }
 
-        /* Servizi Extra */
+        /* ========== RITO BOX ========== */
+        .rito-box {
+            background-color: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 8px 15px;
+            margin: 12px 0;
+        }
+        .rito-label {
+            font-size: 9pt;
+            color: #e65100;
+            font-weight: bold;
+        }
+        .rito-value {
+            font-size: 10pt;
+            color: #bf360c;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
+        /* ========== SERVIZI EXTRA ========== */
         .extra-box {
             background-color: #f5f5f5;
             border-left: 4px solid #9c27b0;
-            padding: 10px 12px;
-            margin: 12px 0;
+            padding: 12px 15px;
+            margin: 15px 0;
         }
         .extra-tag {
             display: inline-block;
             background: #fff;
             border: 1px solid #d0d0d0;
-            padding: 4px 10px;
-            margin: 2px;
-            font-size: 10px;
+            border-radius: 4px;
+            padding: 5px 12px;
+            margin: 3px 5px 3px 0;
+            font-size: 9pt;
         }
         .checkmark {
             display: inline-block;
             background: #9c27b0;
             color: white;
-            width: 12px;
-            height: 12px;
+            width: 14px;
+            height: 14px;
             text-align: center;
-            line-height: 12px;
-            font-size: 9px;
-            margin-right: 4px;
+            line-height: 14px;
+            font-size: 10px;
+            border-radius: 2px;
+            margin-right: 6px;
         }
 
-        /* Section Title */
+        /* ========== SECTION TITLES ========== */
         h2 {
             color: #e91e63;
-            font-size: 14px;
-            margin: 15px 0 10px 0;
-            padding-bottom: 6px;
+            font-size: 12pt;
+            font-weight: bold;
+            margin: 25px 0 12px 0;
+            padding-bottom: 8px;
             border-bottom: 2px solid #f8bbd0;
         }
 
-        /* Tabella Servizi */
-        .servizi-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 10px; }
+        /* ========== TABELLA SERVIZI ========== */
+        .servizi-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+        }
         .servizi-table th {
             background: #e91e63;
             color: white;
-            padding: 8px;
+            padding: 10px 12px;
             text-align: left;
             font-weight: bold;
+            font-size: 10pt;
         }
-        .servizi-table th.right { text-align: right; }
+        .servizi-table th.right {
+            text-align: right;
+        }
         .servizi-table td {
-            padding: 8px;
+            padding: 10px 12px;
             border-bottom: 1px solid #e0e0e0;
+            font-size: 10pt;
         }
-        .servizi-table td.right { text-align: right; }
-        .sconto-verde { color: #4caf50; font-weight: bold; }
+        .servizi-table td.right {
+            text-align: right;
+        }
+        .servizi-table tr:nth-child(even) td {
+            background-color: #fafafa;
+        }
+        .sconto-verde {
+            color: #4caf50;
+            font-weight: bold;
+        }
 
-        /* Two Column Grid per Note e Totali */
-        .two-col-table { width: 100%; border-collapse: separate; border-spacing: 15px 0; margin: 15px 0; }
-        .two-col-table > tbody > tr > td { width: 50%; vertical-align: top; padding: 0; }
+        /* ========== LAYOUT DUE COLONNE ========== */
+        .two-col-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .two-col-table > tbody > tr > td {
+            width: 50%;
+            vertical-align: top;
+            padding: 0 8px 0 0;
+        }
+        .two-col-table > tbody > tr > td:last-child {
+            padding: 0 0 0 8px;
+        }
         .column-box {
             background: #fafafa;
-            padding: 12px;
+            padding: 15px;
             border: 2px solid #e91e63;
+            border-radius: 4px;
+            height: 100%;
         }
         .column-box h3 {
-            margin: 0 0 8px 0;
+            margin: 0 0 12px 0;
             color: #e91e63;
-            font-size: 12px;
-            padding-bottom: 6px;
+            font-size: 11pt;
+            font-weight: bold;
+            padding-bottom: 8px;
             border-bottom: 2px solid #f8bbd0;
         }
 
-        /* Tabella Totali interna */
-        .totali-inner { width: 100%; border-collapse: collapse; font-size: 11px; }
-        .totali-inner td { padding: 4px 0; border: none; }
-        .totali-inner td.right { text-align: right; font-weight: bold; }
-        .totali-inner .highlight { background-color: #fff9c4; }
-        .totali-inner .sconto-row td { color: #4caf50; }
-        .totali-inner .subtotale-row td { border-top: 2px solid #ddd; padding-top: 6px; }
-        .totali-inner .enpals-detail td { font-size: 9px; color: #666; background-color: #fffaf0; }
-
-        /* Box Totale Finale */
-        .totale-finale {
-            background: #f8bbd0;
-            padding: 10px 12px;
-            margin-top: 10px;
-            font-size: 16px;
-            font-weight: bold;
-            color: #e91e63;
+        /* ========== TABELLA TOTALI ========== */
+        .totali-inner {
+            width: 100%;
+            border-collapse: collapse;
         }
-        .totale-finale-table { width: 100%; }
-        .totale-finale-table td { border: none; padding: 0; }
-        .totale-finale-table td.right { text-align: right; }
+        .totali-inner td {
+            padding: 5px 0;
+            border: none;
+            font-size: 10pt;
+        }
+        .totali-inner td.right {
+            text-align: right;
+            font-weight: bold;
+        }
+        .totali-inner .highlight td {
+            background-color: #fff9c4;
+        }
+        .totali-inner .sconto-row td {
+            color: #4caf50;
+        }
+        .totali-inner .subtotale-row td {
+            border-top: 1px solid #ddd;
+            padding-top: 8px;
+        }
+        .totali-inner .enpals-detail td {
+            font-size: 8pt;
+            color: #666;
+            background-color: #fffaf0;
+            padding: 3px 0;
+        }
 
-        /* Acconti */
+        /* ========== BOX TOTALE FINALE ========== */
+        .totale-finale {
+            background: #e91e63;
+            color: white;
+            padding: 12px 15px;
+            margin-top: 15px;
+            border-radius: 4px;
+        }
+        .totale-finale-table {
+            width: 100%;
+        }
+        .totale-finale-table td {
+            border: none;
+            padding: 0;
+            font-size: 14pt;
+            font-weight: bold;
+            color: white;
+        }
+        .totale-finale-table td.right {
+            text-align: right;
+        }
+
+        /* ========== ACCONTI ========== */
         .acconto-box {
             background: #e8f5e9;
-            padding: 8px 12px;
+            padding: 12px 15px;
             border-left: 4px solid #4caf50;
-            margin: 8px 0;
-            font-size: 10px;
+            border-radius: 0 4px 4px 0;
+            margin: 15px 0;
         }
-        .acconto-box p { margin: 3px 0; }
-        .acconto-box strong { color: #2e7d32; }
-
-        /* Note */
-        .note-box {
-            background: #fffaf0;
-            padding: 8px 12px;
-            border-left: 4px solid #ff9800;
-            margin: 8px 0;
-            font-size: 11px;
-            line-height: 1.6;
+        .acconto-box p {
+            margin: 4px 0;
+            font-size: 10pt;
         }
-
-        /* Footer */
-        .footer {
-            margin-top: 15px;
+        .acconto-box strong {
+            color: #2e7d32;
+        }
+        .acconto-title {
+            font-size: 11pt;
+            font-weight: bold;
+            color: #2e7d32;
+            margin-bottom: 8px;
+        }
+        .acconto-restante {
+            margin-top: 10px;
             padding-top: 10px;
-            border-top: 1px solid #ddd;
-            text-align: center;
-            font-size: 9px;
-            color: #999;
+            border-top: 1px solid #4caf50;
+            font-weight: bold;
         }
-        .footer strong { color: #e91e63; }
+
+        /* ========== ALTRI SERVIZI ========== */
+        .altri-servizi-box {
+            background: #f8f8f8;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .altri-servizi-note {
+            margin-top: 10px;
+            font-size: 8pt;
+            color: #999;
+            font-style: italic;
+        }
+
+        /* ========== FOOTER ========== */
+        .footer {
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 2px solid #e91e63;
+            text-align: center;
+            font-size: 9pt;
+            color: #666;
+        }
+        .footer strong {
+            color: #e91e63;
+            font-size: 10pt;
+        }
     </style>
 </head>
 <body>
+<div class="container">
 
     <!-- Header -->
     <div class="header">
@@ -357,12 +1111,12 @@ class MM_PDF_Generator {
         }
 
         $html .= '<div class="company-name">' . esc_html($company_name) . '</div>
-                    <div class="subtitle">DJ - Animazione - Scenografie - Photo Booth</div>
+                    <div class="company-subtitle">DJ - Animazione - Scenografie - Photo Booth</div>
                 </td>
-                <td style="width: 40%; text-align: right;">
+                <td class="preventivo-box">
                     <div class="preventivo-title">PREVENTIVO</div>
                     <div class="preventivo-numero">N. ' . esc_html($preventivo['numero_preventivo']) . '</div>
-                    <div class="preventivo-numero" style="margin-top: 3px;">del ' . date('d/m/Y', strtotime($preventivo['data_preventivo'])) . '</div>
+                    <div class="preventivo-numero">del ' . date('d/m/Y', strtotime($preventivo['data_preventivo'])) . '</div>
                 </td>
             </tr>
         </table>
@@ -371,31 +1125,33 @@ class MM_PDF_Generator {
     <!-- Tipo Evento e Stato -->
     <table class="tipo-stato-table">
         <tr>
-            <td class="tipo-evento-cell">TIPO DI EVENTO RICHIESTO: ' . esc_html($categoria_icona) . ' ' . strtoupper(esc_html($categoria_display)) . '</td>
-            <td class="stato-cell">STATO: ' . strtoupper(esc_html($stato_label)) . '</td>
+            <td class="tipo-evento-cell">TIPO DI EVENTO: ' . esc_html($categoria_icona) . ' ' . strtoupper(esc_html($categoria_display)) . '</td>
+            <td class="stato-cell">' . strtoupper(esc_html($stato_label)) . '</td>
         </tr>
     </table>
 
     <!-- Info Cliente e Evento -->
     <table class="info-table">
+        <tbody>
         <tr>
             <td>
                 <div class="info-box">
                     <div class="info-box-title">' . esc_html($label_cliente) . '</div>
                     <div class="info-row-main">' . esc_html($preventivo['sposi']) . '</div>
-                    <div class="info-row">' . esc_html($preventivo['email']) . '</div>
-                    <div class="info-row">' . esc_html($preventivo['telefono']) . '</div>
+                    <div class="info-row">&#9993; ' . esc_html($preventivo['email']) . '</div>
+                    <div class="info-row">&#9742; ' . esc_html($preventivo['telefono']) . '</div>
                 </div>
             </td>
             <td>
                 <div class="info-box">
                     <div class="info-box-title">Dettagli Evento</div>
-                    <div class="info-row-main">' . date('d/m/Y', strtotime($preventivo['data_evento'])) . '</div>
-                    <div class="info-row">' . esc_html($preventivo['tipo_evento']) . '</div>
-                    <div class="info-row">' . esc_html($preventivo['location']) . '</div>
+                    <div class="info-row-main">&#128197; ' . date('d/m/Y', strtotime($preventivo['data_evento'])) . '</div>
+                    <div class="info-row">&#127881; ' . esc_html($preventivo['tipo_evento']) . '</div>
+                    <div class="info-row">&#128205; ' . esc_html($preventivo['location']) . '</div>
                 </div>
             </td>
         </tr>
+        </tbody>
     </table>';
 
         // Rito/Cerimonia
@@ -409,9 +1165,9 @@ class MM_PDF_Generator {
                 }
             }
             if (!empty($cerimonia_items)) {
-                $html .= '<div style="margin: 8px 0; padding: 6px 12px; background: #fff3e0; border-left: 4px solid #ff9800;">
-                    <span style="font-size: 10px; color: #e65100; font-weight: bold;">RITO:</span>
-                    <span style="font-size: 11px; color: #bf360c; font-weight: 600; margin-left: 8px;">' . implode(' - ', $cerimonia_items) . '</span>
+                $html .= '<div class="rito-box">
+                    <span class="rito-label">RITO:</span>
+                    <span class="rito-value">' . implode(' - ', $cerimonia_items) . '</span>
                 </div>';
             }
         }
@@ -472,16 +1228,17 @@ class MM_PDF_Generator {
 
         // Layout a due colonne: Note (sinistra) e Totali (destra)
         $html .= '<table class="two-col-table">
+            <tbody>
             <tr>
                 <!-- Colonna Note -->
                 <td>
                     <div class="column-box">
-                        <h3>Note</h3>';
+                        <h3>&#128221; Note</h3>';
 
         if (!empty($preventivo['note'])) {
-            $html .= '<div style="line-height: 1.5; font-size: 11px;">' . nl2br(esc_html($preventivo['note'])) . '</div>';
+            $html .= '<div style="line-height: 1.6; font-size: 10pt;">' . nl2br(esc_html($preventivo['note'])) . '</div>';
         } else {
-            $html .= '<p style="color: #999; font-style: italic; font-size: 11px;">Nessuna nota aggiuntiva</p>';
+            $html .= '<p style="color: #999; font-style: italic; font-size: 10pt;">Nessuna nota aggiuntiva</p>';
         }
 
         $html .= '</div>
@@ -490,7 +1247,7 @@ class MM_PDF_Generator {
                 <!-- Colonna Totali -->
                 <td>
                     <div class="column-box">
-                        <h3>Riepilogo Importi</h3>
+                        <h3>&#128176; Riepilogo Importi</h3>
                         <table class="totali-inner">';
 
         // Evidenzia totale servizi se non ci sono sconti
@@ -560,6 +1317,7 @@ class MM_PDF_Generator {
                     </div>
                 </td>
             </tr>
+            </tbody>
         </table>';
 
         // Acconti
@@ -573,18 +1331,18 @@ class MM_PDF_Generator {
 
         if (!empty($acconti)) {
             $html .= '<div class="acconto-box">
-                <p><strong>Acconti Versati:</strong></p>';
+                <p class="acconto-title">&#10004; Acconti Versati</p>';
             $totale_acconti = 0;
             foreach ($acconti as $acconto) {
                 $importo_acc = floatval($acconto['importo_acconto']);
                 $totale_acconti += $importo_acc;
-                $html .= '<p>&#10003; Acconto del ' . date('d/m/Y', strtotime($acconto['data_acconto'])) . ': <strong>' . number_format($importo_acc, 2, ',', '.') . ' &euro;</strong></p>';
+                $html .= '<p>Acconto del ' . date('d/m/Y', strtotime($acconto['data_acconto'])) . ': <strong>' . number_format($importo_acc, 2, ',', '.') . ' &euro;</strong></p>';
             }
             if (count($acconti) > 1) {
-                $html .= '<p><strong>Totale acconti: ' . number_format($totale_acconti, 2, ',', '.') . ' &euro;</strong></p>';
+                $html .= '<p style="margin-top: 5px;"><strong>Totale acconti: ' . number_format($totale_acconti, 2, ',', '.') . ' &euro;</strong></p>';
             }
             $restante = $totale - $totale_acconti;
-            $html .= '<p style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #4caf50;"><strong>Restante da saldare: ' . number_format($restante, 2, ',', '.') . ' &euro;</strong></p>
+            $html .= '<p class="acconto-restante">Restante da saldare: ' . number_format($restante, 2, ',', '.') . ' &euro;</p>
             </div>';
         }
 
@@ -600,14 +1358,14 @@ class MM_PDF_Generator {
         });
 
         if (!empty($servizi_disponibili)) {
-            $html .= '<h2 style="margin-top: 25px;">Altri Servizi Disponibili</h2>
-            <div style="background: #f8f8f8; padding: 12px; border: 1px solid #e0e0e0;">
+            $html .= '<h2>&#128203; Altri Servizi Disponibili</h2>
+            <div class="altri-servizi-box">
                 <table class="servizi-table" style="margin: 0;">
                     <thead>
                         <tr>
-                            <th style="text-align: left;">Servizio</th>
-                            <th style="width: 120px; text-align: left;">Categoria</th>
-                            <th style="width: 90px; text-align: right;">Prezzo</th>
+                            <th>Servizio</th>
+                            <th style="width: 110px;">Categoria</th>
+                            <th class="right" style="width: 100px;">Prezzo</th>
                         </tr>
                     </thead>
                     <tbody>';
@@ -623,24 +1381,24 @@ class MM_PDF_Generator {
             foreach ($servizi_disponibili as $servizio) {
                 $prezzo_display = $servizio['prezzo_default'] > 0
                     ? number_format($servizio['prezzo_default'], 2, ',', '.') . ' &euro;'
-                    : 'Su richiesta';
+                    : '<span style="color: #999; font-style: italic;">Su richiesta</span>';
 
                 $html .= '<tr>
-                    <td style="padding: 6px 8px;">' . esc_html($servizio['nome_servizio']);
+                    <td>' . esc_html($servizio['nome_servizio']);
 
                 if (!empty($servizio['descrizione'])) {
-                    $html .= '<br><small style="color: #666; font-size: 8px;">' . esc_html($servizio['descrizione']) . '</small>';
+                    $html .= '<br><span style="color: #888; font-size: 8pt;">' . esc_html($servizio['descrizione']) . '</span>';
                 }
 
                 $html .= '</td>
-                    <td style="padding: 6px 8px; color: #666; font-size: 9px;">' . esc_html($servizio['categoria'] ?: '—') . '</td>
-                    <td style="padding: 6px 8px; text-align: right; font-weight: 600; color: #e91e63;">' . $prezzo_display . '</td>
+                    <td style="color: #666; font-size: 9pt;">' . esc_html($servizio['categoria'] ?: '—') . '</td>
+                    <td class="right" style="font-weight: 600; color: #e91e63;">' . $prezzo_display . '</td>
                 </tr>';
             }
 
             $html .= '</tbody>
                 </table>
-                <p style="margin: 8px 0 0 0; font-size: 8px; color: #999; font-style: italic;">
+                <p class="altri-servizi-note">
                     I servizi sopra elencati sono disponibili su richiesta. Contattaci per maggiori informazioni.
                 </p>
             </div>';
@@ -651,9 +1409,10 @@ class MM_PDF_Generator {
             <strong>' . esc_html($company_name) . '</strong><br>
             ' . esc_html($company_address) . '<br>
             ' . esc_html($company_piva) . ' - ' . esc_html($company_cf) . '<br>
-            Tel. ' . esc_html($company_phone) . ' - Email: ' . esc_html($company_email) . '
+            &#9742; ' . esc_html($company_phone) . ' &nbsp;&nbsp; &#9993; ' . esc_html($company_email) . '
         </div>
 
+</div>
 </body>
 </html>';
 
@@ -727,7 +1486,7 @@ class MM_PDF_Generator {
     }
 
     /**
-     * Genera HTML per allegato (versione pulita senza pulsanti)
+     * Genera HTML per allegato PDF (versione compatta, una pagina A4)
      */
     private static function generate_attachment_html($preventivo, $company_name, $company_address, $company_phone, $company_email, $company_piva, $company_cf, $company_logo) {
         // Calcoli
@@ -756,298 +1515,360 @@ class MM_PDF_Generator {
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Preventivo ' . esc_html($preventivo['numero_preventivo']) . '</title>
     <style>
+        @page { margin: 0; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: 14px;
-            line-height: 1.6;
+            font-family: DejaVu Sans, Arial, sans-serif;
+            font-size: 10px;
+            line-height: 1.3;
             color: #333;
-            background: #f5f5f5;
-            padding: 20px;
+            padding: 20mm;
         }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        .header-table {
+            width: 100%;
+            margin-bottom: 12px;
+            border-collapse: collapse;
         }
-        .header {
-            background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);
-            color: white;
-            padding: 40px 30px;
-            text-align: center;
+        .header-table td {
+            vertical-align: middle;
+            padding: 0;
         }
-        .header img {
-            max-height: 80px;
-            margin-bottom: 20px;
+        .logo-cell {
+            width: 50%;
         }
-        .header h1 {
-            font-size: 28px;
-            font-weight: 700;
-            margin-bottom: 10px;
+        .logo-cell img {
+            max-height: 45px;
+            max-width: 150px;
         }
-        .header p {
-            font-size: 16px;
-            opacity: 0.9;
+        .title-cell {
+            width: 50%;
+            text-align: right;
         }
-        .content {
-            padding: 40px 30px;
+        .doc-title {
+            font-size: 22px;
+            font-weight: bold;
+            color: #c2185b;
+            margin: 0;
         }
-        .section {
-            margin-bottom: 30px;
-        }
-        .section-title {
-            font-size: 18px;
-            font-weight: 700;
-            color: #e91e63;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #e91e63;
-        }
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-        }
-        .info-box {
-            background: #f9f9f9;
-            padding: 15px;
-            border-radius: 8px;
-        }
-        .info-label {
-            font-size: 12px;
+        .doc-number {
+            font-size: 11px;
             color: #666;
-            text-transform: uppercase;
-            font-weight: 600;
-            margin-bottom: 5px;
         }
-        .info-value {
-            font-size: 15px;
-            color: #333;
-            font-weight: 500;
+        .info-section {
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            padding: 10px 12px;
+            margin-bottom: 12px;
         }
-        table {
+        .info-table {
             width: 100%;
             border-collapse: collapse;
-            margin: 15px 0;
         }
-        th {
-            background: #e91e63;
-            color: white;
-            padding: 12px;
-            text-align: left;
+        .info-table td {
+            padding: 3px 8px 3px 0;
+            vertical-align: top;
+        }
+        .info-label {
+            font-size: 8px;
+            color: #888;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+        .info-value {
+            font-size: 11px;
+            color: #333;
             font-weight: 600;
         }
-        td {
-            padding: 12px;
-            border-bottom: 1px solid #e0e0e0;
+        .section-title {
+            font-size: 11px;
+            font-weight: bold;
+            color: #c2185b;
+            padding: 6px 0 4px 0;
+            border-bottom: 2px solid #c2185b;
+            margin-bottom: 6px;
+            text-transform: uppercase;
         }
-        .text-right { text-align: right; }
-        .totals-box {
-            background: linear-gradient(135deg, #f9f9f9 0%, #f0f0f0 100%);
-            padding: 20px;
-            border-radius: 8px;
-        }
-        .total-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            font-size: 15px;
-        }
-        .total-row.main {
-            font-size: 20px;
-            font-weight: 700;
-            color: #e91e63;
-            padding-top: 15px;
-            border-top: 2px solid #e91e63;
-            margin-top: 10px;
-        }
-        .footer {
-            background: #f5f5f5;
-            padding: 30px;
-            text-align: center;
-            border-top: 1px solid #e0e0e0;
-        }
-        .footer .company-name {
-            font-size: 18px;
-            font-weight: 700;
-            color: #e91e63;
+        .services-table {
+            width: 100%;
+            border-collapse: collapse;
             margin-bottom: 10px;
         }
-        .footer p {
-            font-size: 13px;
-            color: #666;
-            margin: 5px 0;
+        .services-table th {
+            background: #c2185b;
+            color: white;
+            padding: 6px 8px;
+            text-align: left;
+            font-size: 9px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .services-table th.price-col {
+            text-align: right;
+            width: 80px;
+        }
+        .services-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #eee;
+            font-size: 10px;
+        }
+        .services-table td.price-col {
+            text-align: right;
+            font-weight: 600;
+        }
+        .totals-section {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .totals-section td {
+            padding: 0;
+            vertical-align: top;
+        }
+        .totals-left {
+            width: 55%;
+        }
+        .totals-right {
+            width: 45%;
+        }
+        .totals-box {
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            padding: 8px 10px;
+        }
+        .total-row {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .total-row td {
+            padding: 3px 0;
+            font-size: 10px;
+        }
+        .total-row td.label {
+            text-align: left;
+        }
+        .total-row td.value {
+            text-align: right;
+            font-weight: 600;
+        }
+        .total-row.main td {
+            font-size: 14px;
+            font-weight: bold;
+            color: #c2185b;
+            padding-top: 6px;
+            border-top: 2px solid #c2185b;
+        }
+        .acconti-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9px;
+        }
+        .acconti-table th {
+            background: #eee;
+            padding: 4px 6px;
+            text-align: left;
+            font-weight: bold;
+        }
+        .acconti-table th.price-col {
+            text-align: right;
+        }
+        .acconti-table td {
+            padding: 3px 6px;
+            border-bottom: 1px solid #eee;
+        }
+        .acconti-table td.price-col {
+            text-align: right;
+        }
+        .acconti-table tr.totale td {
+            font-weight: bold;
+            border-top: 1px solid #ccc;
+        }
+        .notes-box {
+            background: #fffde7;
+            border: 1px solid #ffeb3b;
+            padding: 8px 10px;
+            margin-top: 10px;
+            font-size: 9px;
+        }
+        .notes-box strong {
+            color: #f57c00;
+        }
+        .footer {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 8px;
+            color: #888;
+            border-top: 1px solid #ddd;
+            padding-top: 8px;
+        }
+        .footer .company {
+            font-weight: bold;
+            color: #c2185b;
+            font-size: 10px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">';
+    <!-- Header con logo e titolo -->
+    <table class="header-table">
+        <tr>
+            <td class="logo-cell">';
 
         if (!empty($company_logo)) {
             $html .= '<img src="' . esc_url($company_logo) . '" alt="Logo">';
+        } else {
+            $html .= '<span style="font-size: 14px; font-weight: bold; color: #c2185b;">' . esc_html($company_name) . '</span>';
         }
 
-        $html .= '
-            <h1>PREVENTIVO</h1>
-            <p>N° ' . esc_html($preventivo['numero_preventivo']) . '</p>
-        </div>
+        $html .= '</td>
+            <td class="title-cell">
+                <div class="doc-title">PREVENTIVO</div>
+                <div class="doc-number">N° ' . esc_html($preventivo['numero_preventivo']) . ' del ' . date('d/m/Y') . '</div>
+            </td>
+        </tr>
+    </table>
 
-        <div class="content">
-            <div class="section">
-                <div class="section-title">Informazioni Evento</div>
-                <div class="info-grid">
-                    <div class="info-box">
-                        <div class="info-label">Cliente</div>
-                        <div class="info-value">' . esc_html($preventivo['sposi']) . '</div>
-                    </div>
-                    <div class="info-box">
-                        <div class="info-label">Data Evento</div>
-                        <div class="info-value">' . date('d/m/Y', strtotime($preventivo['data_evento'])) . '</div>
-                    </div>';
-
-        if (!empty($preventivo['location'])) {
-            $html .= '
-                    <div class="info-box">
-                        <div class="info-label">Location</div>
-                        <div class="info-value">' . esc_html($preventivo['location']) . '</div>
-                    </div>';
-        }
+    <!-- Info Evento -->
+    <div class="info-section">
+        <table class="info-table">
+            <tr>
+                <td style="width: 50%;">
+                    <div class="info-label">Cliente</div>
+                    <div class="info-value">' . esc_html($preventivo['sposi']) . '</div>
+                </td>
+                <td style="width: 25%;">
+                    <div class="info-label">Data Evento</div>
+                    <div class="info-value">' . date('d/m/Y', strtotime($preventivo['data_evento'])) . '</div>
+                </td>
+                <td style="width: 25%;">';
 
         if (!empty($preventivo['tipo_evento'])) {
-            $html .= '
-                    <div class="info-box">
-                        <div class="info-label">Tipo Evento</div>
-                        <div class="info-value">' . esc_html($preventivo['tipo_evento']) . '</div>
-                    </div>';
+            $html .= '<div class="info-label">Tipo</div>
+                    <div class="info-value">' . esc_html($preventivo['tipo_evento']) . '</div>';
         }
 
-        $html .= '
-                </div>
-            </div>
+        $html .= '</td>
+            </tr>';
 
-            <div class="section">
-                <div class="section-title">Servizi Inclusi</div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Servizio</th>
-                            <th class="text-right">Prezzo</th>
-                        </tr>
-                    </thead>
-                    <tbody>';
+        if (!empty($preventivo['location'])) {
+            $html .= '<tr>
+                <td colspan="3">
+                    <div class="info-label">Location</div>
+                    <div class="info-value">' . esc_html($preventivo['location']) . '</div>
+                </td>
+            </tr>';
+        }
+
+        $html .= '</table>
+    </div>
+
+    <!-- Servizi -->
+    <div class="section-title">Servizi Inclusi</div>
+    <table class="services-table">
+        <thead>
+            <tr>
+                <th>Descrizione Servizio</th>
+                <th class="price-col">Importo</th>
+            </tr>
+        </thead>
+        <tbody>';
 
         foreach ($servizi as $servizio) {
             $prezzo = floatval($servizio['prezzo']);
             $sconto_serv = isset($servizio['sconto']) ? floatval($servizio['sconto']) : 0;
             $totale_serv = $prezzo - $sconto_serv;
 
-            $html .= '
-                        <tr>
-                            <td>' . esc_html($servizio['nome_servizio']) . '</td>
-                            <td class="text-right">€ ' . number_format($totale_serv, 2, ',', '.') . '</td>
-                        </tr>';
+            $html .= '<tr>
+                <td>' . esc_html($servizio['nome_servizio']) . '</td>
+                <td class="price-col">' . number_format($totale_serv, 2, ',', '.') . ' &euro;</td>
+            </tr>';
         }
 
-        $html .= '
-                    </tbody>
-                </table>
-            </div>
+        $html .= '</tbody>
+    </table>
 
-            <div class="section">
-                <div class="totals-box">
-                    <div class="total-row">
-                        <span>Subtotale:</span>
-                        <span>€ ' . number_format($subtotale, 2, ',', '.') . '</span>
-                    </div>';
+    <!-- Totali e Acconti affiancati -->
+    <table class="totals-section">
+        <tr>
+            <td class="totals-left">';
 
-        if ($applica_enpals && $enpals_committente > 0) {
-            $html .= '
-                    <div class="total-row">
-                        <span>ENPALS Committente:</span>
-                        <span>€ ' . number_format($enpals_committente, 2, ',', '.') . '</span>
-                    </div>';
-        }
-
-        if ($applica_iva && $iva > 0) {
-            $html .= '
-                    <div class="total-row">
-                        <span>IVA (22%):</span>
-                        <span>€ ' . number_format($iva, 2, ',', '.') . '</span>
-                    </div>';
-        }
-
-        $html .= '
-                    <div class="total-row main">
-                        <span>TOTALE:</span>
-                        <span>€ ' . number_format($totale, 2, ',', '.') . '</span>
-                    </div>
-                </div>
-            </div>';
-
+        // Mostra acconti se presenti
         if (!empty($acconti)) {
-            $html .= '
-            <div class="section">
-                <div class="section-title">Acconti Previsti</div>
-                <table>
+            $html .= '<div class="section-title" style="font-size: 10px;">Piano Pagamenti</div>
+                <table class="acconti-table">
                     <thead>
                         <tr>
-                            <th>Data</th>
-                            <th class="text-right">Importo</th>
+                            <th>Scadenza</th>
+                            <th class="price-col">Importo</th>
                         </tr>
                     </thead>
                     <tbody>';
 
             foreach ($acconti as $acconto) {
-                $html .= '
-                        <tr>
-                            <td>' . date('d/m/Y', strtotime($acconto['data_acconto'])) . '</td>
-                            <td class="text-right">€ ' . number_format(floatval($acconto['importo_acconto']), 2, ',', '.') . '</td>
-                        </tr>';
+                $html .= '<tr>
+                    <td>' . date('d/m/Y', strtotime($acconto['data_acconto'])) . '</td>
+                    <td class="price-col">' . number_format(floatval($acconto['importo_acconto']), 2, ',', '.') . ' &euro;</td>
+                </tr>';
             }
 
-            $html .= '
-                        <tr style="font-weight: 700; border-top: 2px solid #e91e63;">
-                            <td>Totale Acconti</td>
-                            <td class="text-right">€ ' . number_format($totale_acconti, 2, ',', '.') . '</td>
-                        </tr>
+            $html .= '<tr class="totale">
+                        <td>Totale Acconti</td>
+                        <td class="price-col">' . number_format($totale_acconti, 2, ',', '.') . ' &euro;</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Saldo Finale</strong></td>
+                        <td class="price-col"><strong>' . number_format($totale - $totale_acconti, 2, ',', '.') . ' &euro;</strong></td>
+                    </tr>
+                </tbody>
+            </table>';
+        }
+
+        $html .= '</td>
+            <td class="totals-right">
+                <div class="totals-box">
+                    <table class="total-row">
                         <tr>
-                            <td>Restante</td>
-                            <td class="text-right">€ ' . number_format($totale - $totale_acconti, 2, ',', '.') . '</td>
+                            <td class="label">Subtotale</td>
+                            <td class="value">' . number_format($subtotale, 2, ',', '.') . ' &euro;</td>
+                        </tr>';
+
+        if ($applica_enpals && $enpals_committente > 0) {
+            $html .= '<tr>
+                            <td class="label">ENPALS Committente</td>
+                            <td class="value">' . number_format($enpals_committente, 2, ',', '.') . ' &euro;</td>
+                        </tr>';
+        }
+
+        if ($applica_iva && $iva > 0) {
+            $html .= '<tr>
+                            <td class="label">IVA 22%</td>
+                            <td class="value">' . number_format($iva, 2, ',', '.') . ' &euro;</td>
+                        </tr>';
+        }
+
+        $html .= '<tr class="main">
+                            <td class="label">TOTALE</td>
+                            <td class="value">' . number_format($totale, 2, ',', '.') . ' &euro;</td>
                         </tr>
-                    </tbody>
-                </table>
-            </div>';
-        }
-
-        if (!empty($preventivo['note'])) {
-            $html .= '
-            <div class="section">
-                <div class="section-title">Note</div>
-                <div style="background: #f9f9f9; padding: 15px; border-radius: 8px;">
-                    ' . nl2br(esc_html($preventivo['note'])) . '
+                    </table>
                 </div>
+            </td>
+        </tr>
+    </table>';
+
+        // Note (solo se presenti)
+        if (!empty($preventivo['note'])) {
+            $html .= '<div class="notes-box">
+                <strong>Note:</strong> ' . nl2br(esc_html($preventivo['note'])) . '
             </div>';
         }
 
+        // Footer
         $html .= '
-        </div>
-
-        <div class="footer">
-            <div class="company-name">' . esc_html($company_name) . '</div>
-            <p>' . esc_html($company_address) . '</p>
-            <p>Tel. ' . esc_html($company_phone) . ' - Email: ' . esc_html($company_email) . '</p>
-            <p>' . esc_html($company_piva) . ' - ' . esc_html($company_cf) . '</p>
-            <p style="margin-top: 20px; font-size: 12px; color: #999;">
-                © ' . date('Y') . ' ' . esc_html($company_name) . '. Tutti i diritti riservati.
-            </p>
-        </div>
+    <div class="footer">
+        <div class="company">' . esc_html($company_name) . '</div>
+        ' . esc_html($company_address) . ' | Tel. ' . esc_html($company_phone) . ' | ' . esc_html($company_email) . '<br>
+        ' . esc_html($company_piva) . ' - ' . esc_html($company_cf) . '
     </div>
 </body>
 </html>';
@@ -2470,7 +3291,11 @@ class MM_PDF_Generator {
         <div class="action-buttons">
             <button onclick="window.print()" class="action-btn">
                 🖨️ Stampa
-            </button>
+            </button>';
+
+        // Mostra pulsanti aggiuntivi solo se l'utente è loggato
+        if (MM_Auth::is_logged_in()) {
+            echo '
             <button onclick="sharePreventivo()" class="action-btn share-btn">
                 📤 Condividi
             </button>
@@ -2482,7 +3307,10 @@ class MM_PDF_Generator {
             </a>
             <a href="https://wa.me/' . preg_replace('/[^0-9+]/', '', $preventivo['telefono']) . '?text=' . urlencode('🎉 Ciao! Ti invio il preventivo ' . $preventivo['numero_preventivo'] . '. Puoi visualizzarlo qui: ' . $public_link) . '" target="_blank" class="action-btn whatsapp-btn">
                 💬 WhatsApp
-            </a>
+            </a>';
+        }
+
+        echo '
         </div>
 
         <div class="header">

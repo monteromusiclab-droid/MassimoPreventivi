@@ -27,6 +27,17 @@ class MM_Admin {
         // AJAX handlers per tipi evento
         add_action('wp_ajax_mm_save_tipo_evento', array($this, 'ajax_save_tipo_evento'));
         add_action('wp_ajax_mm_delete_tipo_evento', array($this, 'ajax_delete_tipo_evento'));
+
+        // AJAX handlers per collaboratori
+        add_action('wp_ajax_mm_save_collaboratore', array($this, 'ajax_save_collaboratore'));
+        add_action('wp_ajax_mm_get_collaboratore', array($this, 'ajax_get_collaboratore'));
+        add_action('wp_ajax_mm_delete_collaboratore', array($this, 'ajax_delete_collaboratore'));
+
+        // AJAX handlers per assegnazioni
+        add_action('wp_ajax_mm_assegna_collaboratore', array($this, 'ajax_assegna_collaboratore'));
+        add_action('wp_ajax_mm_rimuovi_assegnazione', array($this, 'ajax_rimuovi_assegnazione'));
+        add_action('wp_ajax_mm_get_assegnazioni_preventivo', array($this, 'ajax_get_assegnazioni_preventivo'));
+        add_action('wp_ajax_mm_get_collaboratori_disponibili', array($this, 'ajax_get_collaboratori_disponibili'));
     }
     
     /**
@@ -77,6 +88,15 @@ class MM_Admin {
             'manage_options',
             'mm-preventivi-tipi-evento',
             array($this, 'render_tipi_evento')
+        );
+
+        add_submenu_page(
+            'mm-preventivi',
+            __('Collaboratori', 'mm-preventivi'),
+            __('Collaboratori', 'mm-preventivi'),
+            'manage_options',
+            'mm-preventivi-collaboratori',
+            array($this, 'render_collaboratori')
         );
 
         add_submenu_page(
@@ -250,6 +270,18 @@ class MM_Admin {
         $tipi_evento = MM_Database::get_tipi_evento();
 
         include MM_PREVENTIVI_PLUGIN_DIR . 'admin/views/tipi-evento.php';
+    }
+
+    /**
+     * Render collaboratori
+     */
+    public function render_collaboratori() {
+        MM_Security::check_admin_permission();
+
+        $collaboratori = MM_Database::get_collaboratori();
+        $mansioni = MM_Database::get_mansioni_collaboratori();
+
+        include MM_PREVENTIVI_PLUGIN_DIR . 'admin/views/collaboratori.php';
     }
 
     /**
@@ -466,6 +498,170 @@ class MM_Admin {
         } else {
             wp_send_json_error(array('message' => __('Errore nell\'eliminazione del tipo evento.', 'mm-preventivi')));
         }
+    }
+
+    // ===================================
+    // AJAX HANDLERS COLLABORATORI
+    // ===================================
+
+    /**
+     * AJAX: Salva collaboratore (nuovo o aggiorna)
+     */
+    public function ajax_save_collaboratore() {
+        MM_Security::check_admin_permission();
+
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'mm_preventivi_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Verifica di sicurezza fallita.', 'mm-preventivi')));
+        }
+
+        $collaboratore_id = isset($_POST['collaboratore_id']) ? intval($_POST['collaboratore_id']) : 0;
+
+        $data = array(
+            'nome' => sanitize_text_field($_POST['nome']),
+            'cognome' => sanitize_text_field($_POST['cognome']),
+            'mansione' => sanitize_text_field($_POST['mansione']),
+            'email' => isset($_POST['email']) ? sanitize_email($_POST['email']) : '',
+            'whatsapp' => isset($_POST['whatsapp']) ? sanitize_text_field($_POST['whatsapp']) : '',
+            'note' => isset($_POST['note']) ? sanitize_textarea_field($_POST['note']) : '',
+            'attivo' => isset($_POST['attivo']) ? 1 : 0
+        );
+
+        if (empty($data['nome']) || empty($data['cognome']) || empty($data['mansione'])) {
+            wp_send_json_error(array('message' => __('Nome, cognome e mansione sono obbligatori.', 'mm-preventivi')));
+        }
+
+        if ($collaboratore_id > 0) {
+            $result = MM_Database::update_collaboratore($collaboratore_id, $data);
+            $message = __('Collaboratore aggiornato con successo.', 'mm-preventivi');
+        } else {
+            $result = MM_Database::save_collaboratore($data);
+            $message = __('Collaboratore creato con successo.', 'mm-preventivi');
+        }
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(array('message' => $result->get_error_message()));
+        } else {
+            wp_send_json_success(array('message' => $message, 'id' => is_numeric($result) ? $result : $collaboratore_id));
+        }
+    }
+
+    /**
+     * AJAX: Ottieni collaboratore
+     */
+    public function ajax_get_collaboratore() {
+        MM_Security::check_admin_permission();
+
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'mm_preventivi_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Verifica di sicurezza fallita.', 'mm-preventivi')));
+        }
+
+        $id = intval($_POST['id']);
+        $collaboratore = MM_Database::get_collaboratore($id);
+
+        if ($collaboratore) {
+            wp_send_json_success(array('collaboratore' => $collaboratore));
+        } else {
+            wp_send_json_error(array('message' => __('Collaboratore non trovato.', 'mm-preventivi')));
+        }
+    }
+
+    /**
+     * AJAX: Elimina collaboratore
+     */
+    public function ajax_delete_collaboratore() {
+        MM_Security::check_admin_permission();
+
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'mm_preventivi_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Verifica di sicurezza fallita.', 'mm-preventivi')));
+        }
+
+        $id = intval($_POST['id']);
+        $result = MM_Database::delete_collaboratore($id);
+
+        if ($result) {
+            wp_send_json_success(array('message' => __('Collaboratore eliminato con successo.', 'mm-preventivi')));
+        } else {
+            wp_send_json_error(array('message' => __('Errore nell\'eliminazione del collaboratore.', 'mm-preventivi')));
+        }
+    }
+
+    /**
+     * AJAX: Assegna collaboratore a preventivo
+     */
+    public function ajax_assegna_collaboratore() {
+        MM_Security::check_admin_permission();
+
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'mm_preventivi_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Verifica di sicurezza fallita.', 'mm-preventivi')));
+        }
+
+        $preventivo_id = intval($_POST['preventivo_id']);
+        $collaboratore_id = intval($_POST['collaboratore_id']);
+
+        $data = array(
+            'ruolo_evento' => isset($_POST['ruolo_evento']) ? sanitize_text_field($_POST['ruolo_evento']) : '',
+            'compenso' => isset($_POST['compenso']) ? floatval($_POST['compenso']) : null,
+            'note' => isset($_POST['note']) ? sanitize_textarea_field($_POST['note']) : ''
+        );
+
+        $result = MM_Database::assegna_collaboratore($preventivo_id, $collaboratore_id, $data);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(array('message' => $result->get_error_message()));
+        } else {
+            wp_send_json_success(array('message' => __('Collaboratore assegnato con successo.', 'mm-preventivi'), 'id' => $result));
+        }
+    }
+
+    /**
+     * AJAX: Rimuovi assegnazione
+     */
+    public function ajax_rimuovi_assegnazione() {
+        MM_Security::check_admin_permission();
+
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'mm_preventivi_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Verifica di sicurezza fallita.', 'mm-preventivi')));
+        }
+
+        $id = intval($_POST['id']);
+        $result = MM_Database::rimuovi_assegnazione($id);
+
+        if ($result) {
+            wp_send_json_success(array('message' => __('Assegnazione rimossa con successo.', 'mm-preventivi')));
+        } else {
+            wp_send_json_error(array('message' => __('Errore nella rimozione dell\'assegnazione.', 'mm-preventivi')));
+        }
+    }
+
+    /**
+     * AJAX: Ottieni assegnazioni per un preventivo
+     */
+    public function ajax_get_assegnazioni_preventivo() {
+        MM_Security::check_admin_permission();
+
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'mm_preventivi_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Verifica di sicurezza fallita.', 'mm-preventivi')));
+        }
+
+        $preventivo_id = intval($_POST['preventivo_id']);
+        $assegnazioni = MM_Database::get_assegnazioni_preventivo($preventivo_id);
+
+        wp_send_json_success(array('assegnazioni' => $assegnazioni));
+    }
+
+    /**
+     * AJAX: Ottieni collaboratori disponibili (per select)
+     */
+    public function ajax_get_collaboratori_disponibili() {
+        MM_Security::check_admin_permission();
+
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'mm_preventivi_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Verifica di sicurezza fallita.', 'mm-preventivi')));
+        }
+
+        $collaboratori = MM_Database::get_collaboratori(array('attivo' => 1));
+
+        wp_send_json_success(array('collaboratori' => $collaboratori));
     }
 }
 

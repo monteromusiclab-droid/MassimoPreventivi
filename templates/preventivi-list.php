@@ -51,6 +51,9 @@ $categorie = MM_Database::get_tipi_evento(true); // Usa tipi evento invece di ca
             <a href="<?php echo get_permalink(); ?>" class="mm-nav-btn mm-nav-btn-active">
                 📊 Tutti i Preventivi
             </a>
+            <a href="<?php echo home_url('/assegnazioni-collaboratori/'); ?>" class="mm-nav-btn">
+                🎵 Assegnazioni
+            </a>
             <a href="<?php echo home_url('/statistiche-preventivi/'); ?>" class="mm-nav-btn">
                 📈 Statistiche
             </a>
@@ -280,8 +283,8 @@ $categorie = MM_Database::get_tipi_evento(true); // Usa tipi evento invece di ca
         </div>
         <div class="mm-modal-body">
             <div class="mm-loading">
-                <div class="mm-spinner"></div>
-                <p>Caricamento...</p>
+                <div class="mm-loading-spinner"></div>
+                <span>Caricamento...</span>
             </div>
             <div id="mm-preventivo-details" style="display: none;"></div>
         </div>
@@ -382,32 +385,28 @@ $categorie = MM_Database::get_tipi_evento(true); // Usa tipi evento invece di ca
 }
 
 .mm-loading {
-    text-align: center;
-    padding: 60px 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    padding: 60px 20px;
     min-height: 200px;
-}
-
-.mm-loading p {
-    font-size: 14px;
     color: #666;
+    font-size: 14px;
     font-weight: 500;
+    gap: 20px;
 }
 
-.mm-spinner {
+.mm-loading-spinner {
     width: 50px;
     height: 50px;
     border: 4px solid #f3f3f3;
-    border-top: 4px solid #e91e63;
+    border-top-color: #e91e63;
     border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin: 0 auto 20px;
+    animation: mm-spin 0.8s linear infinite;
 }
 
-@keyframes spin {
+@keyframes mm-spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
@@ -666,8 +665,17 @@ jQuery(document).ready(function($) {
     });
 
     // Render dettagli preventivo
-    function renderPreventivoDetails(preventivo) {
-        console.log('Rendering preventivo:', preventivo);
+    function renderPreventivoDetails(data) {
+        console.log('Rendering data:', data);
+
+        // Estrai preventivo dai dati strutturati
+        const preventivo = data.preventivo || data;
+        const servizi = data.servizi || preventivo.servizi || [];
+        const assegnazioni = data.assegnazioni || [];
+
+        console.log('Preventivo:', preventivo);
+        console.log('Servizi:', servizi);
+        console.log('Assegnazioni:', assegnazioni);
 
         // Parse cerimonia e servizi_extra (possono essere già array o stringhe JSON)
         let cerimonia = [];
@@ -679,6 +687,10 @@ jQuery(document).ready(function($) {
                     ? JSON.parse(preventivo.cerimonia)
                     : preventivo.cerimonia;
             }
+            // Usa anche cerimonia_array se presente
+            if (preventivo.cerimonia_array && Array.isArray(preventivo.cerimonia_array)) {
+                cerimonia = preventivo.cerimonia_array;
+            }
         } catch (e) {
             console.error('Errore parsing cerimonia:', e);
             cerimonia = [];
@@ -689,6 +701,10 @@ jQuery(document).ready(function($) {
                 serviziExtra = typeof preventivo.servizi_extra === 'string'
                     ? JSON.parse(preventivo.servizi_extra)
                     : preventivo.servizi_extra;
+            }
+            // Usa anche servizi_extra_array se presente
+            if (preventivo.servizi_extra_array && Array.isArray(preventivo.servizi_extra_array)) {
+                serviziExtra = preventivo.servizi_extra_array;
             }
         } catch (e) {
             console.error('Errore parsing servizi_extra:', e);
@@ -707,8 +723,8 @@ jQuery(document).ready(function($) {
                     <div class="mm-detail-item">
                         <div class="mm-detail-label">Stato</div>
                         <div class="mm-detail-value">
-                            <span class="mm-status-badge mm-status-${preventivo.stato}">
-                                ${preventivo.stato.charAt(0).toUpperCase() + preventivo.stato.slice(1)}
+                            <span class="mm-status-badge mm-status-${preventivo.stato || 'bozza'}">
+                                ${preventivo.stato ? preventivo.stato.charAt(0).toUpperCase() + preventivo.stato.slice(1) : 'Bozza'}
                             </span>
                         </div>
                     </div>
@@ -777,7 +793,7 @@ jQuery(document).ready(function($) {
             </div>
 
             <!-- Servizi -->
-            ${preventivo.servizi && preventivo.servizi.length > 0 ? `
+            ${servizi && servizi.length > 0 ? `
                 <div class="mm-detail-section">
                     <h3>📦 Servizi Inclusi</h3>
                     <table class="mm-services-table">
@@ -790,9 +806,9 @@ jQuery(document).ready(function($) {
                             </tr>
                         </thead>
                         <tbody>
-                            ${preventivo.servizi.map(s => `
+                            ${servizi.map(s => `
                                 <tr>
-                                    <td>${s.nome_servizio}</td>
+                                    <td>${s.nome_servizio || ''}</td>
                                     <td style="text-align: right;">€ ${formatNumber(s.prezzo)}</td>
                                     <td style="text-align: right;">${s.sconto > 0 ? '€ ' + formatNumber(s.sconto) : '-'}</td>
                                     <td style="text-align: right;"><strong>€ ${formatNumber(s.prezzo - (s.sconto || 0))}</strong></td>
@@ -800,6 +816,28 @@ jQuery(document).ready(function($) {
                             `).join('')}
                         </tbody>
                     </table>
+                </div>
+            ` : ''}
+
+            <!-- Assegnazioni Collaboratori -->
+            ${assegnazioni && assegnazioni.length > 0 ? `
+                <div class="mm-detail-section">
+                    <h3>👥 Collaboratori Assegnati</h3>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        ${assegnazioni.map(a => {
+                            const initials = ((a.nome || '').charAt(0) + (a.cognome || '').charAt(0)).toUpperCase();
+                            return `
+                                <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #9c27b0;">
+                                    <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px;">${initials}</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600; color: #333; font-size: 14px;">${(a.nome || '') + ' ' + (a.cognome || '')}</div>
+                                        <div style="font-size: 12px; color: #666;">${a.mansione || ''}${a.ruolo_evento ? ' - ' + a.ruolo_evento : ''}</div>
+                                    </div>
+                                    ${a.compenso && parseFloat(a.compenso) > 0 ? `<div style="font-weight: 600; color: #4caf50; font-size: 14px;">€ ${formatNumber(a.compenso)}</div>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
                 </div>
             ` : ''}
 
