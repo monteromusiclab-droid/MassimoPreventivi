@@ -84,52 +84,62 @@ $collaboratori = MM_Database::get_collaboratori(array('attivo' => 1));
     <!-- Filters -->
     <div class="mm-filters-card">
         <form method="get" class="mm-filters-form">
-            <div class="mm-filter-group">
-                <label for="search">Cerca</label>
-                <input type="text"
-                       id="search"
-                       name="search"
-                       placeholder="Cliente, numero, location..."
-                       value="<?php echo isset($_GET['search']) ? esc_attr($_GET['search']) : ''; ?>">
+            <div class="mm-filters-row">
+                <div class="mm-filter-group">
+                    <label for="search">Cerca</label>
+                    <input type="text"
+                           id="search"
+                           name="search"
+                           placeholder="Cliente, numero, location..."
+                           value="<?php echo isset($_GET['search']) ? esc_attr($_GET['search']) : ''; ?>">
+                </div>
+
+                <div class="mm-filter-group">
+                    <label for="stato">Stato</label>
+                    <select id="stato" name="stato">
+                        <option value="">Tutti gli stati</option>
+                        <option value="attivo" <?php selected(isset($_GET['stato']) && $_GET['stato'] === 'attivo'); ?>>Attivo</option>
+                        <option value="accettato" <?php selected(isset($_GET['stato']) && $_GET['stato'] === 'accettato'); ?>>Accettato</option>
+                        <option value="completato" <?php selected(isset($_GET['stato']) && $_GET['stato'] === 'completato'); ?>>Completato</option>
+                    </select>
+                </div>
+
+                <div class="mm-filter-group">
+                    <label for="collaboratore_id">Collaboratore</label>
+                    <select id="collaboratore_id" name="collaboratore_id">
+                        <option value="">Tutti i collaboratori</option>
+                        <?php foreach ($collaboratori as $coll) : ?>
+                            <option value="<?php echo esc_attr($coll['id']); ?>"
+                                <?php selected($filtro_collaboratore_id == $coll['id']); ?>>
+                                <?php echo esc_html($coll['cognome'] . ' ' . $coll['nome'] . ' (' . $coll['mansione'] . ')'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="mm-filter-group mm-filter-checkbox">
+                    <label class="mm-checkbox-label">
+                        <input type="checkbox" name="mostra_passati" value="1"
+                            <?php checked(isset($_GET['mostra_passati']) && $_GET['mostra_passati'] == '1'); ?>>
+                        <span>Mostra passati</span>
+                    </label>
+                </div>
             </div>
 
-            <div class="mm-filter-group">
-                <label for="stato">Stato</label>
-                <select id="stato" name="stato">
-                    <option value="">Tutti</option>
-                    <option value="attivo" <?php selected(isset($_GET['stato']) && $_GET['stato'] === 'attivo'); ?>>Attivo</option>
-                    <option value="accettato" <?php selected(isset($_GET['stato']) && $_GET['stato'] === 'accettato'); ?>>Accettato</option>
-                    <option value="completato" <?php selected(isset($_GET['stato']) && $_GET['stato'] === 'completato'); ?>>Completato</option>
-                </select>
-            </div>
-
-            <div class="mm-filter-group">
-                <label for="collaboratore_id">Collaboratore</label>
-                <select id="collaboratore_id" name="collaboratore_id">
-                    <option value="">Tutti</option>
-                    <?php foreach ($collaboratori as $coll) : ?>
-                        <option value="<?php echo esc_attr($coll['id']); ?>"
-                            <?php selected($filtro_collaboratore_id == $coll['id']); ?>>
-                            <?php echo esc_html($coll['cognome'] . ' ' . $coll['nome'] . ' (' . $coll['mansione'] . ')'); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-            <div class="mm-filter-group">
-                <label>
-                    <input type="checkbox" name="mostra_passati" value="1"
-                        <?php checked(isset($_GET['mostra_passati']) && $_GET['mostra_passati'] == '1'); ?>>
-                    Mostra eventi passati
-                </label>
-            </div>
-
-            <div class="mm-filter-actions">
-                <button type="submit" class="mm-filter-btn mm-filter-btn-primary">Filtra</button>
-                <a href="<?php echo get_permalink(); ?>" class="mm-filter-btn mm-filter-btn-secondary">Reset</a>
-                <button type="button" id="mm-btn-export-pdf" class="mm-filter-btn mm-filter-btn-pdf">
-                    📄 Esporta PDF
-                </button>
+            <div class="mm-filters-actions-row">
+                <div class="mm-filter-buttons-left">
+                    <button type="submit" class="mm-filter-btn mm-filter-btn-primary">
+                        <span class="mm-btn-icon">🔍</span> Filtra
+                    </button>
+                    <a href="<?php echo get_permalink(); ?>" class="mm-filter-btn mm-filter-btn-secondary">
+                        <span class="mm-btn-icon">↺</span> Reset
+                    </a>
+                </div>
+                <div class="mm-filter-buttons-right">
+                    <button type="button" id="mm-btn-export-pdf" class="mm-filter-btn mm-filter-btn-pdf">
+                        <span class="mm-btn-icon">📄</span> Esporta PDF
+                    </button>
+                </div>
             </div>
         </form>
     </div>
@@ -334,6 +344,225 @@ $collaboratori = MM_Database::get_collaboratori(array('attivo' => 1));
 </div>
 
 <style>
+/* Filters Card */
+.mm-filters-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    padding: 20px 25px;
+    margin-bottom: 25px;
+}
+
+.mm-filters-form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.mm-filters-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 1.5fr auto;
+    gap: 20px;
+    align-items: end;
+}
+
+.mm-filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.mm-filter-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.mm-filter-group input[type="text"],
+.mm-filter-group select {
+    padding: 10px 14px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #333;
+    background: #fafafa;
+    transition: all 0.2s ease;
+    min-width: 0;
+}
+
+.mm-filter-group input[type="text"]:focus,
+.mm-filter-group select:focus {
+    outline: none;
+    border-color: #e91e63;
+    background: white;
+    box-shadow: 0 0 0 3px rgba(233, 30, 99, 0.1);
+}
+
+.mm-filter-group input[type="text"]::placeholder {
+    color: #aaa;
+}
+
+.mm-filter-checkbox {
+    justify-content: flex-end;
+    padding-bottom: 2px;
+}
+
+.mm-checkbox-label {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: #555 !important;
+    text-transform: none !important;
+    white-space: nowrap;
+}
+
+.mm-checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #e91e63;
+    cursor: pointer;
+}
+
+.mm-filters-actions-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 15px;
+    border-top: 1px solid #f0f0f0;
+}
+
+.mm-filter-buttons-left,
+.mm-filter-buttons-right {
+    display: flex;
+    gap: 10px;
+}
+
+.mm-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    border: none;
+    white-space: nowrap;
+}
+
+.mm-btn-icon {
+    font-size: 14px;
+}
+
+.mm-filter-btn-primary {
+    background: linear-gradient(135deg, #e91e63 0%, #c2185b 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(233, 30, 99, 0.3);
+}
+
+.mm-filter-btn-primary:hover {
+    background: linear-gradient(135deg, #d81b60 0%, #ad1457 100%);
+    box-shadow: 0 4px 12px rgba(233, 30, 99, 0.4);
+    transform: translateY(-1px);
+}
+
+.mm-filter-btn-secondary {
+    background: #f5f5f5;
+    color: #666;
+    border: 1px solid #e0e0e0;
+}
+
+.mm-filter-btn-secondary:hover {
+    background: #eeeeee;
+    color: #333;
+    border-color: #ccc;
+}
+
+.mm-filter-btn-pdf {
+    background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+}
+
+.mm-filter-btn-pdf:hover {
+    background: linear-gradient(135deg, #43a047 0%, #2e7d32 100%);
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+    transform: translateY(-1px);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .mm-filters-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .mm-filter-checkbox {
+        grid-column: span 2;
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 600px) {
+    .mm-filters-card {
+        padding: 15px;
+    }
+
+    .mm-filters-row {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+
+    .mm-filter-group {
+        width: 100%;
+    }
+
+    .mm-filter-group input[type="text"],
+    .mm-filter-group select {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .mm-filter-checkbox {
+        grid-column: span 1;
+        justify-content: center;
+    }
+
+    .mm-checkbox-label {
+        justify-content: center;
+    }
+
+    .mm-filters-actions-row {
+        flex-direction: column;
+        gap: 12px;
+        align-items: stretch;
+    }
+
+    .mm-filter-buttons-left,
+    .mm-filter-buttons-right {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .mm-filter-btn {
+        flex: 1;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .mm-filter-btn-pdf {
+        width: 100%;
+    }
+}
+
+/* Lista Assegnazioni */
 .mm-assegnazioni-list {
     display: flex;
     flex-direction: column;
@@ -645,16 +874,6 @@ $collaboratori = MM_Database::get_collaboratori(array('attivo' => 1));
 
 .mm-btn-secondary:hover {
     background: #eee;
-}
-
-.mm-filter-btn-pdf {
-    background: #4caf50 !important;
-    color: white !important;
-    border: none !important;
-}
-
-.mm-filter-btn-pdf:hover {
-    background: #43a047 !important;
 }
 
 /* Pagination */
